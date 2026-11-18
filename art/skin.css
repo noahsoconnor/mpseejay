@@ -1,0 +1,8 @@
+/* Decks: a dark DJ-player look over the default renderer (tools/html_art/default.css). */
+:root { --radius: 10px; --sheen: 0.04; --title-size: 15px; --label-size: 13px; --button-size: 18px; }
+.frame-border { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+.frame-title { letter-spacing: 0.18em; fill: var(--ink-dim); }
+.button-tx { font-weight: 700; letter-spacing: 0.08em; }
+.box { fill: none; stroke: none; }   /* readouts sit on the panels and the browser rows */
+.seg-tx { font-weight: 700; letter-spacing: 0.06em; }
+.frame-rule { stroke: none; }
