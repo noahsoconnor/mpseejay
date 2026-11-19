@@ -496,7 +496,7 @@ static int g_learn;
 static unsigned g_learn_rev;
 /* the log and the pad lights (defined further down, beside set_param) */
 #ifndef DECKS_VERSION
-#define DECKS_VERSION 1000
+#define DECKS_VERSION 1100
 #endif
 static int g_debug;
 static void dbg_sync(int sync, const char *fmt, ...);

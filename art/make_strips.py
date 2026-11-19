@@ -46,58 +46,13 @@ def wave(img, f):
     if st == 2:   # playhead: a full-height white line
         rect(img, w // 2 - 2, 0, w // 2 + 2, h, HEAD)
 
-def phase(img, f):
-    deck, f = divmod(f, 34)
-    h, w = len(img), len(img[0])
-    rect(img, 0, h // 2 - 1, w, h // 2 + 1, DIM)
-    rect(img, w // 2 - 1, 0, w // 2 + 1, h, TICK)
-    if f == 0: return
-    off = f - 17
-    x = w // 2 + round(off * (w / 2 - 12) / 16)
-    rect(img, x - 10, 3, x + 10, h - 3, GREEN if abs(off) <= 1 else hexc(DECK[deck]))
-
-def beat(img, f):
-    deck, f = divmod(f, 5)
-    h, w = len(img), len(img[0])
-    bw = (w - 3 * 8) // 4
-    for i in range(4):
-        x = i * (bw + 8)
-        on = f == i + 1
-        rect(img, x, 0, x + bw, h, (HEAD if i == 0 else hexc(DECK[deck])) if on else DIM)
+# the phase meter and beat counter are drawn by make_hw.py
 
 here = os.path.dirname(os.path.abspath(__file__))
 png(os.path.join(here, "wave.png"), 14, 84 * 144, strip(144, 14, 84, wave))
 png(os.path.join(here, "wave_s.png"), 14, 40 * 144, strip(144, 14, 40, wave))   # half height: A and B rows
-png(os.path.join(here, "phase.png"), 560, 24 * 136, strip(136, 560, 24, phase))
-png(os.path.join(here, "beat.png"), 232, 24 * 20, strip(20, 232, 24, beat))
 
-def platter(img, f):   # 4 frames 340x340: the jog platter, ring in deck A / B colour, then amber for A / B (end warning)
-    import math
-    n = len(img); c = n / 2; ring = hexc(DECK[f]) if f < 2 else hexc("ff9a1f")   # 2, 3: the end-of-track flash
-    for y in range(n):
-        for x in range(n):
-            acc = [0, 0, 0, 0]
-            for sy in (0.25, 0.75):
-                for sx in (0.25, 0.75):
-                    r = math.hypot(x + sx - c, y + sy - c)
-                    if r > 167: px = (0, 0, 0, 0)
-                    elif r > 161: px = ring
-                    elif r > 153: px = (10, 12, 15, 255)
-                    elif r > 150: px = (42, 48, 57, 255)
-                    else:
-                        t = r / 150
-                        g = round(34 - 18 * t)
-                        px = (g, g + 3, g + 7, 255)
-                        if 74 < r < 146 and int(r) % 7 == 0: px = (g + 9, g + 12, g + 16, 255)   # grooves
-                        a = math.degrees(math.atan2(x + sx - c, c - y - sy)) % 15
-                        if 128 < r < 144 and (a < 1.2 or a > 13.8):   # tick marks in the ring colour
-                            px = mix(ring, (g, g, g, 255), 0.6)
-                    for i in range(4): acc[i] += px[i] * (px[3] if i < 3 else 1)
-            a = acc[3] / 4
-            img[y][x] = (round(acc[0] / acc[3]) if acc[3] else 0, round(acc[1] / acc[3]) if acc[3] else 0,
-                         round(acc[2] / acc[3]) if acc[3] else 0, round(a))
-
-png(os.path.join(here, "platter.png"), 340, 340 * 4, strip(4, 340, 340, platter))
+# the jog platter is drawn by make_hw.py
 
 # browser rows (920x64): 0 normal, 1 selected, 2/3 on deck A/B, 4/5 the same selected, 6 folder, 7 folder selected, 8 empty
 def row(img, f):
@@ -121,4 +76,4 @@ def veil(img, f):   # 1: the grey veil over a played track's row
 
 png(os.path.join(here, "rows.png"), 920, 64 * 9, strip(9, 920, 64, row))
 png(os.path.join(here, "veil.png"), 920, 64 * 2, strip(2, 920, 64, veil))
-print("wrote wave.png, wave_s.png, phase.png, beat.png, platter.png, rows.png, veil.png")
+print("wrote wave.png, wave_s.png, rows.png, veil.png")

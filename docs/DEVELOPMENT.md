@@ -91,3 +91,10 @@ Nothing has run on an MPC. Sync uses Open MPC's `HAS_SONG_POS`, which Open MPC i
 
 ## Third-party code
 `src/vendor/dr_wav.h`, `dr_mp3.h`: [dr_libs](https://github.com/mackron/dr_libs) (public domain / MIT-0), commit in `src/vendor/COMMIT`, unchanged.
+
+## Skin art
+The hardware look (1.1) is bitmaps: `art/make_hw.py` draws the pads, keycaps, deck and SYNC keys, the jog platter and
+cap, the LCDs, the brushed panels, and the beat and phase LEDs (Pillow and Titillium Web; run it in Docker:
+`docker run --rm -v "$PWD/art:/art" -v "$MPC_VST/tools/html_art/fonts:/fonts:ro" python:3.11-slim sh -c "pip -q install pillow; python /art/make_hw.py /fonts"`).
+`art/make_strips.py` (standard library) draws the waveform strips and browser rows; `art/make_art.py` the header rule
+and the invisible touch plates. The pad strips' frame order must follow `PF_*` in `src/deck.c`.

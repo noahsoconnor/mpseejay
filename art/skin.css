@@ -1,8 +1,9 @@
-/* Decks: a dark DJ-player look over the default renderer (tools/html_art/default.css). */
-:root { --radius: 10px; --sheen: 0.04; --title-size: 15px; --label-size: 13px; --button-size: 18px; }
-.frame-border { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
-.frame-title { letter-spacing: 0.18em; fill: var(--ink-dim); }
-.button-tx { font-weight: 700; letter-spacing: 0.08em; }
-.box { fill: none; stroke: none; }   /* readouts sit on the panels and the browser rows */
-.seg-tx { font-weight: 700; letter-spacing: 0.06em; }
+/* mpSEEJAY: a hardware look over the default renderer (tools/html_art/default.css). The controls and screens are
+   bitmaps from art/make_hw.py; this styles what the renderer draws itself (the LOOP and SETUP panels, segments, knobs). */
+:root { --radius: 12px; --sheen: 0.06; --title-size: 15px; --label-size: 13px; --button-size: 18px; }
+.frame-border { fill: var(--panel); stroke: #050607; stroke-width: 2; }
+.frame-title { letter-spacing: 0.22em; fill: var(--ink-dim); }
+.button-tx { font-weight: 700; letter-spacing: 0.1em; }
+.box { fill: none; stroke: none; }   /* readouts sit on the LCDs and the browser rows */
+.seg-tx { font-weight: 700; letter-spacing: 0.08em; }
 .frame-rule { stroke: none; }
