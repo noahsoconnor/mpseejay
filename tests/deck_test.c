@@ -109,6 +109,7 @@ static void load(deck_t *d, const char *name) {
     pthread_mutex_lock(&d->mu); br_open_dir(d, g_dir, NULL); pthread_mutex_unlock(&d->mu);
     wait_dir(d, g_dir);
     select_and_load(d, name);
+    E->set_param(d, "br_close", "1");   /* loading leaves the browser open (1.3): back to the deck's pads */
 }
 
 static void tap_row(deck_t *d, int row) {
@@ -119,6 +120,72 @@ static void tap_row(deck_t *d, int row) {
 }
 
 static void note(deck_t *d, int n, int on) { uint8_t m[3] = { (uint8_t)(on ? 0x90 : 0x80), (uint8_t)n, (uint8_t)(on ? 100 : 0) }; E->midi(d, m, 3); }
+
+/* ---- a tiny rekordbox export.pdb, written the way rekordbox lays it out (one data page per table) ---- */
+#define PG 4096
+typedef struct { uint8_t b[PG]; int heap, rows; } pg_t;
+static void w4(uint8_t *b, uint32_t v) { b[0] = v; b[1] = v >> 8; b[2] = v >> 16; b[3] = v >> 24; }
+static void w2(uint8_t *b, uint32_t v) { b[0] = v; b[1] = v >> 8; }
+static void pg_init(pg_t *g, uint32_t index, uint32_t type) {
+    memset(g, 0, sizeof *g);
+    w4(g->b + 4, index); w4(g->b + 8, type); w4(g->b + 12, 99); g->b[27] = 0x24;   /* a data page; next page: none in range */
+}
+static int pg_row(pg_t *g, const uint8_t *row, int n) {   /* append a row, return its heap offset */
+    int ofs = g->heap;
+    memcpy(g->b + 0x28 + ofs, row, n); g->heap += (n + 3) & ~3;
+    w2(g->b + PG - 6 - 2 * g->rows, ofs);
+    g->rows++; g->b[24] = g->rows; w2(g->b + PG - 4, (1u << g->rows) - 1);
+    return ofs;
+}
+static int dstr_ascii(uint8_t *o, const char *s) { int n = strlen(s); o[0] = (uint8_t)((n + 1) << 1 | 1); memcpy(o + 1, s, n); return n + 1; }
+static int dstr_u16(uint8_t *o, const char *s) {   /* ASCII text stored as UTF-16LE, like rekordbox does for non-ASCII names */
+    int n = strlen(s); o[0] = 0x90; w2(o + 1, 4 + 2 * n); o[3] = 0;
+    for (int i = 0; i < n; i++) { o[4 + 2 * i] = s[i]; o[5 + 2 * i] = 0; }
+    return 4 + 2 * n;
+}
+static void rb_track(pg_t *g, uint32_t id, uint32_t artist, double bpm, const char *title, const char *path, int u16) {
+    uint8_t r[600] = {0};
+    w2(r, 0x24); w4(r + 0x38, (uint32_t)(bpm * 100)); w4(r + 0x44, artist); w4(r + 0x48, id);
+    r[0x59] = id == 11 ? 4 : 0;   /* rekordbox's stars: Deep One has 4 */
+    int at = 0x5E + 42;
+    int empty = at; r[at++] = 0x03;
+    for (int i = 0; i < 21; i++) w2(r + 0x5E + 2 * i, empty);
+    w2(r + 0x5E + 2 * 17, at); at += u16 ? dstr_u16(r + at, title) : dstr_ascii(r + at, title);
+    w2(r + 0x5E + 2 * 20, at); at += dstr_ascii(r + at, path);
+    pg_row(g, r, at);
+}
+static void write_rb(const char *root) {
+    char p[1200];
+    snprintf(p, sizeof p, "%s/PIONEER", root); mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/PIONEER/rekordbox", root); mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/Contents", root); mkdir(p, 0755);
+    static pg_t hdr, tracks, artists, tree, entries;
+    memset(&hdr, 0, sizeof hdr);
+    w4(hdr.b + 4, PG); w4(hdr.b + 8, 4); w4(hdr.b + 12, 5);
+    uint32_t types[4] = { 0, 2, 7, 8 };
+    for (int i = 0; i < 4; i++) { uint8_t *t = hdr.b + 28 + 16 * i; w4(t, types[i]); w4(t + 8, i + 1); w4(t + 12, i + 1); }
+    pg_init(&tracks, 1, 0); pg_init(&artists, 2, 2); pg_init(&tree, 3, 7); pg_init(&entries, 4, 8);
+    rb_track(&tracks, 11, 5, 124, "Deep One", "/Contents/one.wav", 0);
+    rb_track(&tracks, 12, 0, 97, "No Artist Here", "/Contents/two.wav", 1);
+    rb_track(&tracks, 13, 6, 172, "Gone", "/Contents/missing.wav", 0);
+    rb_track(&tracks, 14, 6, 120, "Wrong Kind", "/Contents/three.m4a", 0);
+    uint8_t a[64] = {0}; w2(a, 0x60); w4(a + 4, 5); a[8] = 3; a[9] = 10; int n = dstr_ascii(a + 10, "Some Artist"); pg_row(&artists, a, 10 + n);
+    memset(a, 0, sizeof a); w2(a, 0x60); w4(a + 4, 6); a[8] = 3; a[9] = 10; n = dstr_ascii(a + 10, "Other"); pg_row(&artists, a, 10 + n);
+    /* tree: folder "Gigs" (1) holds "Friday" (3); "Warm Up" (2) at the top, sorted before "Gigs" */
+    struct { uint32_t parent, sort, id, folder; const char *name; } nodes[] = { {0, 2, 1, 1, "Gigs"}, {0, 1, 2, 0, "Warm Up"}, {1, 1, 3, 0, "Friday"} };
+    for (int i = 0; i < 3; i++) {
+        uint8_t r[64] = {0};
+        w4(r, nodes[i].parent); w4(r + 8, nodes[i].sort); w4(r + 12, nodes[i].id); w4(r + 16, nodes[i].folder);
+        pg_row(&tree, r, 20 + dstr_ascii(r + 20, nodes[i].name));
+    }
+    /* Friday: two.wav, one.wav (in that order), a missing file and an m4a; Warm Up: one.wav */
+    uint32_t ent[][3] = { {2, 11, 3}, {1, 12, 3}, {3, 13, 3}, {4, 14, 3}, {1, 11, 2} };
+    for (int i = 0; i < 5; i++) { uint8_t r[12]; w4(r, ent[i][0]); w4(r + 4, ent[i][1]); w4(r + 8, ent[i][2]); pg_row(&entries, r, 12); }
+    snprintf(p, sizeof p, "%s" RB_PDB, root);
+    FILE *f = fopen(p, "wb");
+    fwrite(hdr.b, PG, 1, f); fwrite(tracks.b, PG, 1, f); fwrite(artists.b, PG, 1, f); fwrite(tree.b, PG, 1, f); fwrite(entries.b, PG, 1, f);
+    fclose(f);
+}
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "build/test_tracks";
@@ -136,9 +203,13 @@ int main(int argc, char **argv) {
     deck_t *d = E->create(NULL);
     char b[128];
     /* browser: top level lists the tracks folder; open it with two row taps (select, then open) */
-    CHECK(wait_dir(d, ""), "browser opens on the drives list");
+    CHECK(wait_dir(d, ""), "browser opens at the top");
     E->get_param(d, "br_path", b, sizeof b);
-    CHECK(!strncmp(b, "DRIVES", 6), "top level is called DRIVES (%s)", b);
+    CHECK(!strcmp(b, "BROWSE") && index_of(d, "FOLDERS") == 0, "the top is BROWSE, FOLDERS first (%s)", b);
+    tap_row(d, 1);
+    CHECK(wait_dir(d, "folders:"), "FOLDERS opens the drives");
+    E->get_param(d, "br_path", b, sizeof b);
+    CHECK(!strncmp(b, "FOLDERS", 7), "its path line says FOLDERS (%s)", b);
     int ti = index_of(d, "test_tracks");
     CHECK(ti >= 0, "drives list shows the tracks folder (row %d)", ti + 1);
     E->set_param(d, "br_open", "1"); E->set_param(d, "br_open", "0");
@@ -160,12 +231,12 @@ int main(int argc, char **argv) {
     E->get_param(d, "track_display", b, sizeof b);
     CHECK(!strcmp(b, "b_97_48k.wav"), "the Browse knob selects and shows the file (%s)", b);
     E->set_param(d, "br_up", "1");
-    CHECK(wait_dir(d, ""), "UP goes back to the drives");
+    CHECK(wait_dir(d, "folders:"), "UP goes back to the drives");
     CHECK(d->sel == ti, "UP selects the folder it came from");
     tap_row(d, ti + 1);   /* already selected: opens */
     CHECK(wait_dir(d, g_dir), "tapping the selected folder opens it");
     tap_row(d, 2); tap_row(d, 2);
-    CHECK(wait_loaded(d, "a_124.wav", 20) && d->browse == 0, "tapping a file twice loads it and closes the browser");
+    CHECK(wait_loaded(d, "a_124.wav", 20) && d->browse == 1, "tapping a file twice loads it, the browser staying open");
 
     /* tempo detection */
     struct { const char *name; double bpm, lead, rate; } tr[] = { {"a_124.wav", 124, 0.30, 44100}, {"b_97_48k.wav", 97, 0.11, 48000}, {"c_172.wav", 172, 0, 44100} };
@@ -605,13 +676,14 @@ int main(int argc, char **argv) {
             CHECK(atoi(pv) == PF_B_LOADB * 3 + 1, "LOAD B is lit when a file is selected (%s)", pv);
             uint8_t p2[3] = {0x90, 37, 100}, p2off[3] = {0x80, 37, 0};
             E->midi(d, p2, 3);   /* pad 2 is LOAD B here, not PLAY */
-            CHECK(!d->browse && d->playing == was_playing, "pad 2 loads onto deck B and closes the browser, no play/pause");
+            CHECK(d->browse && d->playing == was_playing, "pad 2 loads onto deck B, the browser staying open, no play/pause");
+            E->set_param(d, "br_close", "1");   /* closed while the pad is still down */
             E->midi(d, p2off, 3);
             CHECK(!d->pad_held && d->playing == was_playing, "its release, after the browser closed, doesn't reach PLAY");
         }
         /* browser rows: on a deck, played, selected; EJECT off a drive */
         {
-            pthread_mutex_lock(&d->mu); br_open_dir(d, g_dir, NULL); pthread_mutex_unlock(&d->mu);
+            pthread_mutex_lock(&d->mu); br_open_dir(d, g_dir, NULL); d->browse = 1; pthread_mutex_unlock(&d->mu);
             wait_dir(d, g_dir);
             int ia = index_of(d, "a_124.wav"), ib = index_of(d, "b_97_48k.wav");
             char v[16]; snprintf(v, sizeof v, "%d", ia); E->set_param(d, "track", v);
@@ -625,7 +697,7 @@ int main(int argc, char **argv) {
                 pthread_mutex_lock(&g_mu); char pth[1100]; snprintf(pth, sizeof pth, "%s/b_97_48k.wav", g_dir); played_add(pth); pthread_mutex_unlock(&g_mu);
                 snprintf(k, sizeof k, "br_%d", rb); E->get_param(d, k, t, sizeof t);
                 char k2[16], t2[16]; snprintf(k2, sizeof k2, "brd_%d", rb); E->get_param(d, k2, t2, sizeof t2);
-                CHECK(!strchr(t, 0x5b) && atoi(t2) == 1, "a played track is greyed, the name alone (%s, veil %s)", t, t2);
+                CHECK(!strchr(t, 0x5b) && atoi(t2) == 2, "a played track is greyed, the name alone (%s, veil %s)", t, t2);
             }
             /* deck A has played well over 30 s: the next poll puts it on the played list */
             d->play_frames = 31 * SR; d->played_marked = 0;
@@ -718,6 +790,100 @@ int main(int argc, char **argv) {
     CHECK(wait_status(d3, "Missing", 5), "a missing track shows as missing, settings still restored (vol %.1f)", d3->vol);
     E->destroy(d3);
 
+    /* the START page: tap the waveform, move the start, it is remembered for the file; AUTO forgets it */
+    {
+        char sd[1100], sf[1200], v[160];
+        mkdir("build/test_startdir", 0755);
+        if (!realpath("build/test_startdir", sd)) return 1;
+        snprintf(sf, sizeof sf, "%s/" START_FILE, sd); unlink(sf);
+        { char st2[1200]; snprintf(st2, sizeof st2, "%s/.mpseejay-stars.txt", sd); unlink(st2); }   /* a clean slate for the STARS tests */
+        deck_t *ds = E->create(sd);
+        load(ds, "a_124.wav");
+        CHECK(wait_loaded(ds, "a_124.wav", 20), "START: a track to edit");
+        double aut = ds->start_auto;
+        CHECK(fabs(ds->start - aut) < 1 && fabs(ds->cue - aut) < 1 && !ds->start_set, "it loads at its automatic start (%.0f)", aut);
+        E->set_param(ds, "st_open", "1");
+        E->get_param(ds, "browse", v, sizeof v);
+        CHECK(atoi(v) == 2 && !ds->browse, "tapping the waveform opens the START page (%s)", v);
+        E->set_param(ds, "st_beat_up", "1"); E->set_param(ds, "st_beat_up", "0");
+        double beat = 60.0 * SR / ds->bpm;
+        CHECK(fabs(ds->start - (aut + beat)) < 1 && fabs(ds->cue - ds->start) < 1, "BEAT > moves the start (and the cue) one beat (%.0f)", ds->start - aut);
+        E->set_param(ds, "st_bar_dn", "1");
+        CHECK(fabs(ds->start - (aut + beat - 4 * beat > 0 ? aut + beat - 4 * beat : 0)) < 1, "< BAR moves it a bar back, not before the top (%.0f)", ds->start);
+        E->set_param(ds, "st_top", "1");
+        E->set_param(ds, "st_fine_up", "1");
+        CHECK(fabs(ds->start - 0.01 * SR) < 1 && ds->start_set, "TRACK TOP, then FINE > 10 ms (%.0f)", ds->start);
+        E->get_param(ds, "st_info", v, sizeof v);
+        CHECK(strstr(v, "START 0:00.01") && strstr(v, "SET BY HAND") && strlen(v) < 48, "the page says where and how it was set (%s)", v);
+        E->get_param(ds, "st_pos", v, sizeof v);
+        CHECK(!strncmp(v, "PLAYHEAD 0:00.01", 16), "and where the playhead is (%s)", v);
+        int marks = 0, dim = 0;
+        for (int c = 1; c <= ZW_COLS; c++) {
+            char k[16]; snprintf(k, sizeof k, "zw_%d", c); E->get_param(ds, k, v, sizeof v);
+            int st = (atoi(v) - ds->deck_id * 3 * WF_LEVELS) / WF_LEVELS; marks += st == 2; dim += st == 1;
+        }
+        CHECK(marks == 1 && dim == 0, "its waveform marks the start once, nothing before it at the top (%d, %d)", marks, dim);
+        E->set_param(ds, "st_beat_up", "1"); E->set_param(ds, "st_beat_up", "1");
+        double mine = ds->start;
+        for (int w = 0; w < 100 && (ds->jobs & JOB_STARTS); w++) usleep(10000);
+        usleep(50000);
+        FILE *f = fopen(sf, "r"); char line[1300] = ""; if (f) { if (!fgets(line, sizeof line, f)) line[0] = 0; fclose(f); }
+        CHECK(strstr(line, "a_124.wav") && fabs(atof(line) - mine) < 1, "the start is saved in the Tracks folder (%s)", line);
+        load(ds, "c_172.wav"); wait_loaded(ds, "c_172.wav", 20);
+        load(ds, "a_124.wav"); wait_loaded(ds, "a_124.wav", 20);
+        CHECK(fabs(ds->start - mine) < 1 && fabs(ds->cue - mine) < 1 && ds->start_set, "loaded again, the track starts where it was set (%.0f)", ds->start);
+        E->set_param(ds, "st_auto", "1");
+        CHECK(fabs(ds->start - aut) < 1 && !ds->start_set, "AUTO goes back to the automatic start");
+        for (int w = 0; w < 100 && (ds->jobs & JOB_STARTS); w++) usleep(10000);
+        usleep(50000);
+        f = fopen(sf, "r"); line[0] = 0; if (f) { if (!fgets(line, sizeof line, f)) line[0] = 0; fclose(f); }
+        CHECK(!strstr(line, "a_124.wav"), "and forgets the one set by hand (%s)", line);
+        E->set_param(ds, "st_play", "1");
+        CHECK(ds->playing, "PLAY FROM START plays");
+        E->set_param(ds, "st_play", "1");
+        CHECK(!ds->playing && fabs(ds->park - ds->start) < 1, "and again stops, back to the start");
+        E->get_param(ds, "tm_len", v, sizeof v);
+        CHECK(!strcmp(v, "OF 1:00"), "the clock shows the length (%s)", v);
+        E->get_param(ds, "tm_rem", v, sizeof v);
+        double left = (ds->t->frames - ds->pos) / SR / steady_rate(ds);
+        CHECK(v[0] == '-' && fabs(atof(v + 3) - fmod(left, 60)) < 0.11, "and the time left at the current tempo (%s, %.2f s)", v, left);
+        E->get_param(ds, "rem_a", v, sizeof v);
+        CHECK(v[0] == '-' || v[0] == ' ', "each deck's time left beside its tempo (%s)", v);
+        /* a MIDI fader learned as the pitch fader, with soft takeover */
+        E->set_param(ds, "pitch", "0");
+        char plk[8]; snprintf(plk, sizeof plk, "pl_%c", 'a' + ds->deck_id);
+        E->set_param(ds, plk, "1");   /* SETUP: LEARN DECK A (or B) FADER */
+        uint8_t cc[3] = {0xB2, 7, 127};
+        E->midi(ds, cc, 3);
+        E->get_param(ds, "pf_label", v, sizeof v);
+        CHECK(ds->pf_cc == 2 * 128 + 7 && !ds->pf_learn && strstr(v, "CC 7  CH 3"), "LEARN DECK FADER takes the next CC for that deck (%s)", v);
+        snprintf(plk, sizeof plk, "pfl_%c", 'a' + ds->deck_id); E->get_param(ds, plk, v, sizeof v);
+        CHECK(strstr(v, "CC 7  CH 3") != NULL, "and SETUP shows it beside that deck's button (%s)", v);
+        E->midi(ds, cc, 3);
+        CHECK(ds->pitch == 0, "the fader far from the pitch doesn't jump it (%.2f)", ds->pitch);
+        cc[2] = 64; E->midi(ds, cc, 3);
+        cc[2] = 127; E->midi(ds, cc, 3);
+        CHECK(fabsf(ds->pitch - 1) < 1e-6f, "once it reaches the pitch it takes over: top is +8%% (%.2f)", ds->pitch);
+        E->set_param(ds, "pf_dir", "1");
+        cc[2] = 0; E->midi(ds, cc, 3); cc[2] = 127; E->midi(ds, cc, 3);
+        CHECK(fabsf(ds->pitch + 1) < 1e-6f, "UP = - turns it round, like a CDJ (%.2f)", ds->pitch);
+        E->set_param(ds, "pitch", "0"); cc[2] = 64; E->midi(ds, cc, 3); cc[2] = 70; E->midi(ds, cc, 3);   /* picked up again */
+        double pk = ds->pitch;
+        tempo_step(ds, 1);
+        cc[2] = 71; E->midi(ds, cc, 3);
+        CHECK(ds->pitch != pk && ds->pitch != (float)(-(71 / 127.0 * 2 - 1)), "after BPM + the fader waits to meet the new pitch (%.3f)", ds->pitch);
+        cc[2] = 0; E->midi(ds, cc, 3); cc[2] = 127; E->midi(ds, cc, 3);
+        cc[1] = 8; cc[2] = 0; E->midi(ds, cc, 3);
+        CHECK(fabsf(ds->pitch + 1) < 1e-6f, "another CC leaves the pitch alone");
+        char stt[600]; E->get_param(ds, "state", stt, sizeof stt);
+        CHECK(strstr(stt, "pf_cc=263") && strstr(stt, "pf_dir=1"), "the fader is saved with the project");
+        E->set_param(ds, "pitch", "0");
+        E->set_param(ds, "st_done", "1");
+        E->get_param(ds, "browse", v, sizeof v);
+        CHECK(atoi(v) == 0, "DONE goes back to the deck");
+        E->destroy(ds);
+    }
+
     /* demo: 8 bars, a roll, filter sweep, cue jump */
     E->set_param(d, "volume", "0.8"); E->set_param(d, "eq_low", "0");
     load(d, "a_124.wav"); wait_loaded(d, "a_124.wav", 20);
@@ -734,6 +900,221 @@ int main(int argc, char **argv) {
     drwav w; drwav_init_file_write(&w, "build/demo.wav", &f, NULL); drwav_write_pcm_frames(&w, rn, rec); drwav_uninit(&w);
     free(rec);
     E->destroy(d);
+
+    /* a silent intro: the music's start is found past hiss, and a track that starts at once has none */
+    {
+        int64_t fr = SR * 10; int16_t *pc = calloc(fr * 2, sizeof *pc);
+        for (int64_t i = 0; i < fr; i++) {
+            int v = i < SR * 4 ? (int)((i * 7919 % 200) - 100) : (int)(12000 * sin(i * 0.05));   /* 4 s of quiet hiss */
+            pc[2 * i] = pc[2 * i + 1] = (int16_t)v;
+        }
+        double fs = first_sound(pc, fr);
+        CHECK(fs >= SR * 4 - 900 && fs <= SR * 4, "the music's start is found after 4 s of hiss (%.2f s)", fs / SR);
+        for (int64_t i = 0; i < fr; i++) pc[2 * i] = pc[2 * i + 1] = (int16_t)(12000 * sin(i * 0.05));
+        CHECK(first_sound(pc, fr) == 0, "a track that starts at once starts from the top");
+        free(pc);
+    }
+
+    /* a folder's tracks: artist and title from "Artist - Title" names and MP3 ID3 tags, tempo from TBPM or a deck */
+    {
+        char a[256], t[256]; float bpm;
+        file_meta("/nowhere/Kerri Chandler - Rain.wav", "Kerri Chandler - Rain.wav", a, t, sizeof a, &bpm);
+        CHECK(!strcmp(a, "Kerri Chandler") && !strcmp(t, "Rain") && bpm == 0, "a name splits into artist and title (%s / %s)", a, t);
+        file_meta("/nowhere/just a name.wav", "just a name.wav", a, t, sizeof a, &bpm);
+        CHECK(!a[0] && !strcmp(t, "just a name"), "a name without \" - \" is the title (%s)", t);
+        mkdir("build/test_id3", 0755);
+        const char *mp = "build/test_id3/x - y.mp3";
+        FILE *f = fopen(mp, "wb");
+        unsigned char tag[200]; int w = 10;
+        #define FR(id, txt, enc) do { int l = (int)strlen(txt) + 1; memcpy(tag + w, id, 4); tag[w+4]=0; tag[w+5]=0; tag[w+6]=0; tag[w+7]=(unsigned char)l; tag[w+8]=tag[w+9]=0; tag[w+10]=enc; memcpy(tag + w + 11, txt, l - 1); w += 10 + l; } while (0)
+        FR("TPE1", "Tag Artist", 3); FR("TIT2", "Tag Title \xc3\xa9", 3); FR("TBPM", "126", 0);
+        #undef FR
+        memcpy(tag, "ID3\x03\0\0\0\0\0", 10); tag[9] = (unsigned char)(w - 10);
+        fwrite(tag, 1, w, f); fwrite("\xff\xfb", 1, 2, f); fclose(f);
+        file_meta(mp, "x - y.mp3", a, t, sizeof a, &bpm);
+        CHECK(!strcmp(a, "Tag Artist") && !strcmp(t, "Tag Title \xc3\xa9") && bpm == 126, "an MP3's ID3 tag gives artist, title and tempo (%s / %s / %.1f)", a, t, bpm);
+        bpm_seen_add("/nowhere/just a name.wav", 123.5);
+        file_meta("/nowhere/just a name.wav", "just a name.wav", a, t, sizeof a, &bpm);
+        CHECK(bpm > 123.4f && bpm < 123.6f, "a tempo a deck found shows in the folder (%.2f)", bpm);
+        /* damaged tags never read past what was read */
+        unsigned seed = 3;
+        for (int k = 0; k < 200; k++) {
+            unsigned char m[200]; memcpy(m, tag, w);
+            for (int j = 0; j < 6; j++) { seed = seed * 1103515245 + 12345; m[3 + (seed >> 8) % (w - 3)] = seed >> 16; }
+            f = fopen(mp, "wb"); fwrite(m, 1, w, f); fclose(f);
+            file_meta(mp, "x - y.mp3", a, t, sizeof a, &bpm);
+        }
+        CHECK(1, "200 damaged ID3 tags read without a crash");
+        unlink(mp);
+    }
+
+    /* rekordbox playlists: a drive with an export gets a REKORDBOX entry; its playlists list their tracks in order */
+    {
+        char rbdir[1024], p2[1200], src[1200];
+        mkdir("build/test_rb", 0755);
+        if (!realpath("build/test_rb", rbdir)) return 1;
+        write_rb(rbdir);
+        snprintf(src, sizeof src, "%s/a_124.wav", g_dir); snprintf(p2, sizeof p2, "%s/Contents/one.wav", rbdir); unlink(p2); link(src, p2);
+        snprintf(src, sizeof src, "%s/b_97_48k.wav", g_dir); snprintf(p2, sizeof p2, "%s/Contents/two.wav", rbdir); unlink(p2); link(src, p2);
+        snprintf(p2, sizeof p2, "%s/Contents/three.m4a", rbdir); FILE *m4 = fopen(p2, "w"); fputs("x", m4); fclose(m4);
+        CHECK(has_rekordbox(rbdir) && !has_rekordbox(g_dir), "an export.pdb marks a drive as having rekordbox playlists");
+        setenv("DECKS_DIR", rbdir, 1);
+        blist_t *top = list_dir(NULL, "");
+        snprintf(p2, sizeof p2, "rb:0:%s", rbdir);
+        CHECK(top->n == 4 && !strcmp(top->name[2], "CHILL") && !strcmp(top->name[3], "HYPE") && !strcmp(top->name[0], "FOLDERS") && !strcmp(top->name[1], "REKORDBOX") && !strcmp(top->path[1], p2) && top->isdir[1]
+              && !strcmp(top->artist[1], "PLAYLISTS ON test_rb"),
+              "the top has FOLDERS, then REKORDBOX for the stick with an export (%s)", top->n > 1 ? top->name[1] : "-");
+        blist_free(top);
+        top = list_dir(NULL, "folders:");
+        CHECK(top->n == 1 && !strcmp(top->name[0], "test_rb") && !top->parent[0], "FOLDERS lists the drive itself; UP goes to the top (%d)", top->n);
+        blist_free(top);
+        setenv("DECKS_DIR", g_dir, 1);
+        blist_t *l = list_dir(NULL, p2);
+        CHECK(l->n == 2 && !strcmp(l->name[0], "Warm Up") && !strcmp(l->name[1], "Gigs") && l->isdir[0] && l->isdir[1] && !l->parent[0],
+              "the top of the export lists its playlists and folders in rekordbox's order; UP goes to the drives (%d)", l->n);
+        CHECK(strstr(l->title, "test_rb > REKORDBOX") != NULL, "path line names the drive and REKORDBOX (%s)", l->title);
+        char gigs[1200]; snprintf(gigs, sizeof gigs, "%s", l->n > 1 ? l->path[1] : "");
+        blist_free(l);
+        l = list_dir(NULL, gigs);
+        CHECK(l->n == 1 && !strcmp(l->name[0], "Friday") && !strcmp(l->parent, p2), "a folder lists its playlists; UP goes back (%s)", l->parent);
+        char fri[1200]; snprintf(fri, sizeof fri, "%s", l->n ? l->path[0] : "");
+        blist_free(l);
+        l = list_dir(NULL, fri);
+        snprintf(p2, sizeof p2, "%s/Contents/two.wav", rbdir);
+        CHECK(l->n == 2 && !strcmp(l->name[0], "No Artist Here") && !strcmp(l->name[1], "Some Artist - Deep One") && !strcmp(l->path[0], p2) && !l->isdir[0],
+              "a playlist lists its tracks in order as Artist - Title, UTF-16 titles read, missing files and other formats left out (%d: %s)", l->n, l->n ? l->name[0] : "-");
+        CHECK(!strcmp(l->title + strlen(l->title) - strlen("REKORDBOX > Gigs > Friday"), "REKORDBOX > Gigs > Friday"), "path line shows the folders (%s)", l->title);
+        CHECK(!strcmp(l->parent, gigs), "UP from a playlist goes to its folder");
+        blist_free(l);
+        /* the deck: open the playlist, load from it, the path line, and the played/on-deck marks use the real file */
+        deck_t *r = E->create(NULL);
+        pthread_mutex_lock(&r->mu); br_open_dir(r, fri, NULL); pthread_mutex_unlock(&r->mu);
+        CHECK(wait_dir(r, fri), "the browser opens a rekordbox playlist");
+        char pb[128]; E->get_param(r, "br_path", pb, sizeof pb);
+        CHECK(strstr(pb, "Friday   (2)") != NULL, "the path line ends with the playlist and its count (%s)", pb);
+        E->get_param(r, "br_2", pb, sizeof pb);
+        char pa[64], pt[32]; E->get_param(r, "bra_2", pa, sizeof pa); E->get_param(r, "brb_2", pt, sizeof pt);
+        CHECK(!strcmp(pb, "Deep One") && !strcmp(pa, "Some Artist") && !strcmp(pt, "124.0"), "row 2: title, artist and rekordbox's tempo (%s / %s / %s)", pb, pa, pt);
+        E->get_param(r, "bra_1", pa, sizeof pa); E->get_param(r, "brb_1", pt, sizeof pt);
+        CHECK(!strcmp(pa, " ") && !strcmp(pt, "97.0"), "a track with no artist leaves that line empty (%s, %s)", pa, pt);
+        /* SORT: by tempo, then back to the playlist's order, the selection kept */
+        E->set_param(r, "track", "0");
+        E->set_param(r, "br_sort", "3");
+        E->get_param(r, "br_1", pb, sizeof pb);
+        CHECK(!strcmp(pb, "No Artist Here") && r->sel == 0, "SORT BPM: 97 before 124 (%s)", pb);
+        E->set_param(r, "br_sort", "1");
+        E->get_param(r, "br_1", pb, sizeof pb);
+        CHECK(!strcmp(pb, "Deep One") && r->sel == 1, "SORT ARTIST: a track with no artist goes last, the selection follows its track (%s, sel %d)", pb, r->sel);
+        E->set_param(r, "br_sort", "2");
+        E->get_param(r, "br_1", pb, sizeof pb);
+        CHECK(!strcmp(pb, "Deep One"), "SORT TITLE: Deep One before No Artist Here (%s)", pb);
+        E->set_param(r, "br_sort", "0");
+        E->get_param(r, "br_1", pb, sizeof pb);
+        CHECK(!strcmp(pb, "No Artist Here"), "SORT ORDER: the playlist's own order again (%s)", pb);
+        E->set_param(r, "br_sort", "3");
+        char st[512]; E->get_param(r, "state", st, sizeof st);
+        CHECK(strstr(st, "br_sort=3") != NULL, "the sort is saved with the project");
+        pad_browse(r, BROWSE_PADS[14], 1); pad_browse(r, BROWSE_PADS[14], 0);
+        CHECK(BROWSE_PADS[14] == PF_B_SORT && r->br_sort == 4, "pad 15 in the browser is SORT: BPM, then STARS 5-1 (%d)", r->br_sort);
+        E->set_param(r, "br_sort", "5");
+        pad_browse(r, PF_B_SORT, 1);
+        CHECK(r->br_sort == 0, "and STARS 1-5 goes round to ORDER (%d)", r->br_sort);
+        pad_browse(r, PF_B_SORT, 1);
+        CHECK(r->br_sort == 1, "and ORDER to ARTIST (%d)", r->br_sort);
+        E->set_param(r, "br_sort", "0");
+        /* STARS: rekordbox's rating shows; pads 3 / 4 change it, remembered for the file; the star sorts */
+        r->browse = 1;
+        E->set_param(r, "br_sort", "0");
+        char sv[16];
+        E->get_param(r, "brr_2", sv, sizeof sv);
+        CHECK(atoi(sv) == 1 + 4, "rekordbox's 4 stars show on Deep One (%s)", sv);
+        E->get_param(r, "brr_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 1, "an unrated track shows 5 empty stars (%s)", sv);
+        E->set_param(r, "track", "0");
+        CHECK(BROWSE_PADS[2] == PF_B_STAR_DN && BROWSE_PADS[3] == PF_B_STAR_UP, "pads 3 and 4 in the browser are STARS - and +");
+        for (int k = 0; k < 7; k++) pad_browse(r, PF_B_STAR_UP, 1);
+        E->get_param(r, "brr_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 1 + 5, "STARS + rates the selected track, up to 5 (%s)", sv);
+        pad_browse(r, PF_B_STAR_DN, 1); pad_browse(r, PF_B_STAR_DN, 1); pad_browse(r, PF_B_STAR_DN, 1);
+        CHECK(kv_get(&g_stars, r->data_dir, r->bl->path[0]) == 2, "STARS - takes them down; the rating is remembered for the file");
+        E->set_param(r, "br_sort", "4");
+        E->get_param(r, "br_1", pb, sizeof pb);
+        CHECK(!strcmp(pb, "Deep One"), "SORT STARS 5-1: 4 stars before 2 (%s)", pb);
+        E->set_param(r, "br_sort", "5");
+        E->get_param(r, "br_1", pb, sizeof pb);
+        CHECK(!strcmp(pb, "No Artist Here"), "SORT STARS 1-5: 2 stars before 4 (%s)", pb);
+        pthread_mutex_lock(&r->mu); br_open_dir(r, fri, NULL); pthread_mutex_unlock(&r->mu);
+        wait_dir(r, fri);
+        E->get_param(r, "brr_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 1 + 2, "read again, the folder keeps the stars given here (%s)", sv);
+        /* CHILL / HYPE: off until one is pressed; the other switches over; again turns it off; their own sections */
+        E->set_param(r, "track", "0");
+        E->get_param(r, "brg_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 0, "a track starts with neither CHILL nor HYPE (%s)", sv);
+        CHECK(BROWSE_PADS[6] == PF_B_CHILL && BROWSE_PADS[7] == PF_B_HYPE, "pads 7 and 8 in the browser are CHILL and HYPE");
+        pad_browse(r, PF_B_CHILL, 1);
+        E->get_param(r, "brg_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 1, "CHILL switches it to chill (%s)", sv);
+        E->set_param(r, "br_hype", "1");
+        E->get_param(r, "brg_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 2, "HYPE (the screen button) switches it over (%s)", sv);
+        pad_browse(r, PF_B_HYPE, 1);
+        E->get_param(r, "brg_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 0 && kv_get(&g_tags, r->data_dir, r->bl->path[0]) < 0, "HYPE again turns it off and forgets it (%s)", sv);
+        pad_browse(r, PF_B_HYPE, 1);
+        blist_t *tl = list_dir(NULL, "tag:2");
+        CHECK(tl->n == 1 && !strcmp(tl->path[0], r->bl->path[0]) && !strcmp(tl->title, "HYPE"), "the HYPE section lists it (%d)", tl->n);
+        blist_free(tl);
+        tl = list_dir(NULL, "tag:1");
+        CHECK(tl->n == 0, "and the CHILL section doesn't (%d)", tl->n);
+        blist_free(tl);
+        pad_browse(r, PF_B_HYPE, 1);
+        r->browse = 0;
+        E->get_param(r, "brr_1", sv, sizeof sv);
+        CHECK(atoi(sv) == 0, "with the browser closed no stars show");
+        r->browse = 1;
+        E->set_param(r, "br_sort", "0");
+        E->set_param(r, "track", "1");
+        E->set_param(r, "load", "1"); E->set_param(r, "load", "0");
+        CHECK(wait_loaded(r, "one.wav", 20), "LOAD loads the playlist's track from the stick");
+        pthread_mutex_lock(&r->mu); br_open_dir(r, fri, NULL); pthread_mutex_unlock(&r->mu);
+        wait_dir(r, fri);
+        r->browse = 1;
+        E->get_param(r, "brs_2", pb, sizeof pb);
+        CHECK(atoi(pb) == 2 + r->deck_id, "the loaded track is shaded as on its deck (%s)", pb);
+        r->browse = 0;
+        E->get_param(r, "brs_2", pb, sizeof pb); E->get_param(r, "brd_2", pa, sizeof pa);
+        CHECK(atoi(pb) == 8 && atoi(pa) == 0, "with the browser closed the rows show nothing (%s, %s)", pb, pa);
+        r->browse = 1;
+        E->set_param(r, "br_up", "1");
+        CHECK(wait_dir(r, gigs) && r->sel == 0, "UP from the playlist opens its folder, the playlist selected");
+        E->destroy(r);
+        /* a damaged export: no crash, an explanation */
+        snprintf(p2, sizeof p2, "%s" RB_PDB, rbdir);
+        FILE *bad = fopen(p2, "r+b"); fseek(bad, 4, SEEK_SET); fputc(7, bad); fclose(bad);   /* page length 4103: rejected */
+        snprintf(p2, sizeof p2, "rb:0:%s", rbdir);
+        l = list_dir(NULL, p2);
+        CHECK(l->n == 0 && strstr(l->title, "CAN'T READ") != NULL, "a damaged export lists nothing and says so (%s)", l->title);
+        blist_free(l);
+        write_rb(rbdir);
+        /* random damage anywhere in the file never crashes the reader (ASan checks every read) */
+        snprintf(p2, sizeof p2, "%s" RB_PDB, rbdir);
+        FILE *rf = fopen(p2, "rb"); uint8_t *orig = malloc(5 * PG); size_t got = fread(orig, 1, 5 * PG, rf); fclose(rf);
+        unsigned seed = 7; int listed = 0;
+        for (int k = 0; k < 300; k++) {
+            uint8_t *m = malloc(got); memcpy(m, orig, got);
+            for (int j = 0; j < 40; j++) { seed = seed * 1103515245 + 12345; size_t at = PG + (seed >> 8) % (got - PG); seed = seed * 1103515245 + 12345; m[at] = seed >> 16; }
+            FILE *wf = fopen(p2, "wb"); fwrite(m, 1, got, wf); fclose(wf); free(m);
+            const char *dirs[3] = { "", gigs, fri };
+            for (int q = 0; q < 3; q++) {
+                char dd[1200]; if (q == 0) snprintf(dd, sizeof dd, "rb:0:%s", rbdir); else snprintf(dd, sizeof dd, "%s", dirs[q]);
+                blist_t *x = list_dir(NULL, dd); listed += x->n; blist_free(x);
+            }
+        }
+        free(orig);
+        write_rb(rbdir);
+        CHECK(1, "300 randomly damaged exports read without a crash (%d entries listed)", listed);
+    }
 
     printf(fails ? "FAILED (%d)\n" : "PASSED\n", fails);
     return fails != 0;

@@ -35,7 +35,13 @@ FUNCS = (  # (label, colour, pad number), in the order of PF_* in src/deck.c
        ("HALF", "ffd23f", 6), ("DOUBLE", "ffd23f", 7), ("LEADER", "ffb04d", 5), ("BPM +1", "e8edf2", 16),
        ("BPM -1", "e8edf2", 12)]
     # bank B: auto loops
-    + [("LOOP %d" % b, "ff6bd5", i + 1) for i, b in enumerate([1, 2, 4, 8])])
+    + [("LOOP %d" % b, "ff6bd5", i + 1) for i, b in enumerate([1, 2, 4, 8])]
+    # 1.3: the browser's SORT pad (PF_B_SORT)
+    + [("SORT", "ffc14d", 15)]
+    # the browser's STARS - / + pads (PF_B_STAR_DN, PF_B_STAR_UP)
+    + [("STARS -", "ffc14d", 3), ("STARS +", "ffc14d", 4)]
+    # the browser's CHILL / HYPE pads (PF_B_CHILL, PF_B_HYPE)
+    + [("CHILL", "5ac8fa", 7), ("HYPE", "ff5a3c", 8)])
 # Pads that take the deck's colour (pad_deck_coloured in src/deck.c): CUE, pads 5-8, the hot cues and their SHIFT functions
 DECK_COLOURED = {"CUE", "SYNC", "JUMP -", "JUMP +", "SHIFT", "HALF", "DOUBLE", "LEADER"} | {"CUE %d" % i for i in range(1, 9)}
 DECK = {"a": "2f9bff", "b": "ff4d6a"}
@@ -186,16 +192,50 @@ def keycap(name, w, h, label, led=None, led_on=False, pressed=False, tint=None, 
     shrink(img, w, h).save(os.path.join(here, name), optimize=True)
 
 
+def stars():
+    """stars.png: 7 frames 110x20 for a browser row: 0 nothing, then 0 to 5 stars lit (gold) of 5."""
+    import math
+    W, H, F = 110, 20, 7
+    img = Image.new("RGBA", (W * SS, H * F * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for f in range(1, F):
+        for k in range(5):
+            cx, cy, R = (11 + 22 * k) * SS, (f * H + 10) * SS, 9 * SS
+            pts = [(cx + (R if j % 2 == 0 else R * 0.45) * math.sin(math.pi * j / 5),
+                    cy - (R if j % 2 == 0 else R * 0.45) * math.cos(math.pi * j / 5)) for j in range(10)]
+            on = k < f - 1
+            d.polygon(pts, fill=(255, 193, 77, 255) if on else (52, 58, 68, 255))
+    img.resize((W, H * F), Image.LANCZOS).save(os.path.join(here, "stars.png"), optimize=True)
+
+
+def tags():
+    """tags.png: 3 frames 84x28 for a browser row: 0 nothing, 1 CHILL, 2 HYPE (a lit pill)."""
+    W, H = 84, 28
+    img = Image.new("RGBA", (W * SS, H * 3 * SS), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for f, (label, col) in enumerate([("CHILL", "5ac8fa"), ("HYPE", "ff5a3c")], start=1):
+        c = tuple(int(col[i:i + 2], 16) for i in (0, 2, 4))
+        y0 = f * H * SS
+        d.rounded_rectangle([2 * SS, y0 + 3 * SS, (W - 2) * SS, y0 + (H - 3) * SS], radius=11 * SS, fill=c + (255,))
+        spaced(d, W * SS / 2, y0 + H * SS / 2, label, font(13), (8, 9, 11, 255), 1.4)
+    img.resize((W, H * 3), Image.LANCZOS).save(os.path.join(here, "tags.png"), optimize=True)
+
+
 def keys():
     plain = [("bpm_up", "BPM +", 170, 60), ("bpm_dn", "BPM -", 170, 60), ("reset", "RESET", 170, 50),
              ("browse", "BROWSE", 170, 56), ("back", "BACK", 150, 50), ("pgup", "PAGE UP", 150, 50),
              ("pgdn", "PAGE DOWN", 170, 50), ("close", "CLOSE", 130, 50), ("jback", "JUMP BACK", 170, 70),
-             ("jfwd", "JUMP FWD", 170, 70), ("refresh", "REFRESH", 150, 50)]
+             ("jfwd", "JUMP FWD", 170, 70), ("refresh", "REFRESH", 150, 50),
+             # 1.3: the START page
+             ("st_bar_dn", "< BAR", 190, 66), ("st_beat_dn", "< BEAT", 190, 66), ("st_fine_dn", "< FINE", 190, 66),
+             ("st_fine_up", "FINE >", 190, 66), ("st_beat_up", "BEAT >", 190, 66), ("st_bar_up", "BAR >", 190, 66),
+             ("st_set", "START AT PLAYHEAD", 330, 66), ("st_auto", "AUTO", 190, 66), ("st_top", "TRACK TOP", 220, 66),
+             ("st_play", "PLAY FROM START", 330, 66), ("st_done", "DONE", 130, 50)]
     for n, label, w, h in plain:
         keycap("key_%s.png" % n, w, h, label)
         keycap("key_%s_on.png" % n, w, h, label, pressed=True)
     for n, label, w, h, led in [("load_a", "LOAD A", 170, 50, DECK["a"]), ("load_b", "LOAD B", 170, 50, DECK["b"]),
-                                ("eject", "EJECT", 130, 50, "ffb04d"), ("learn", "LEARN PADS", 230, 66, "ffb04d")]:
+                                ("eject", "EJECT", 130, 50, "ffb04d"), ("learn", "LEARN PADS", 230, 66, "ffb04d"), ("pl_a", "LEARN DECK A FADER", 270, 50, DECK["a"]), ("pl_b", "LEARN DECK B FADER", 270, 50, DECK["b"]), ("chill", "CHILL", 145, 50, "5ac8fa"), ("hype", "HYPE", 145, 50, "ff5a3c")]:
         keycap("key_%s.png" % n, w, h, label, led=led, led_on=True)
         keycap("key_%s_on.png" % n, w, h, label, led=led, led_on=True, pressed=True)
     keycap("sync_off.png", 170, 58, "SYNC", led="ffffff")
@@ -390,6 +430,8 @@ def meters():
 
 if __name__ == "__main__":
     pads()
+    stars()
+    tags()
     keys()
     platter()
     panels()

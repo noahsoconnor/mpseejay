@@ -21,6 +21,16 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include "engine.h"
+#ifdef __linux__
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#endif
+
+/* Loading a track (decode, resample, tempo, waveform) is long work over a lot of memory. On the MPC it ran in big
+ * unbroken passes and the deck that was playing could crackle (1.3, 2026-11-20). The worker runs at a lower priority and
+ * pauses briefly after every couple of seconds of audio it gets through, so the playing deck always comes first. */
+static void load_breathe(void) { usleep(400); }
+#define BREATHE_FRAMES (2 * 44100)
 
 #define DR_WAV_IMPLEMENTATION
 #define DR_WAV_NO_STDIO_WIDE
@@ -51,7 +61,27 @@ typedef struct {
     char name[256];    /* file name: the project falls back to finding it by name */
     char path[1024];   /* full path, saved in the project */
     uint8_t wf[WF_COLS];   /* overview waveform: peak level per column, 0..WF_LEVELS-1 */
+    double sound;      /* frame where the music starts, past a silent (or near-silent) intro; 0 = from the top */
+    double mine;       /* the start set by hand for this file on the START page (frames), -1 = none */
 } track_t;
+
+/* Where the music starts: the first 20 ms block whose peak reaches a tenth (-20 dB) of the track's loudest peak, so a
+ * quiet hiss or vinyl crackle before it still counts as silence. 0 when that is in the first quarter second. */
+static double first_sound(const int16_t *pcm, int64_t frames) {
+    int peak = 0;
+    for (int64_t i = 0; i < frames * 2; i += 8) {   /* every 4th frame is plenty for the loudest peak */
+        int a = abs(pcm[i]); if (a > peak) peak = a;
+        if (i % (BREATHE_FRAMES * 2) == 0 && i) load_breathe();
+    }
+    if (peak < 64) return 0;
+    const int64_t blk = 882;   /* 20 ms at 44.1 kHz */
+    for (int64_t b = 0; b < frames; b += blk) {
+        int m = 0;
+        for (int64_t i = b * 2; i < (b + blk) * 2 && i < frames * 2; i++) { int a = abs(pcm[i]); if (a > m) m = a; }
+        if (m * 10 >= peak) return b < SR / 4 ? 0 : (double)b;
+    }
+    return 0;
+}
 
 typedef struct {
     char **paths; char **names; int n;
@@ -127,59 +157,440 @@ static tlist_t *scan_all(const char *data_dir) {
 
 /* ---------- the track browser: one folder's listing (worker thread) ---------- */
 
+#include "rekordbox.h"   /* (also u8put, for ID3 text) */
+
 #define BR_ROWS 6   /* rows on screen (0.9.8: 6 full-width rows, 40 px names, readable in a dark club) */
 #define BR_MAX 5000
 
 typedef struct {
     int n;
     char **name, **path; char *isdir;
+    char **artist, **song;   /* what the rows show: a track's artist and title ("" artist: unknown); a folder's name */
+    float *bpm;              /* the track's tempo, 0 = unknown */
+    char *stars;             /* the track's stars, 0 (none) to 5: given here, else rekordbox's */
+    char *tag;               /* TAG_NONE, TAG_CHILL or TAG_HYPE */
+    int *ord;                /* the position in the folder or playlist (SORT: ORDER puts them back) */
+    int sort;                /* the order the entries are in now (BR_SORT_*) */
     char dir[1024];      /* "" = the top level (drives) */
     char parent[1024];   /* where UP goes */
+    char title[512];     /* the path line, when it isn't the folder's path (rekordbox playlists) */
 } blist_t;
+
+enum { TAG_NONE, TAG_CHILL, TAG_HYPE };   /* g_tags: a track's CHILL / HYPE switch (one or neither) */
+enum { BR_SORT_ORDER, BR_SORT_ARTIST, BR_SORT_TITLE, BR_SORT_BPM, BR_SORT_STARS_HI, BR_SORT_STARS_LO, BR_SORTS };
 
 static void blist_free(blist_t *b) {
     if (!b) return;
-    for (int i = 0; i < b->n; i++) { free(b->name[i]); free(b->path[i]); }
-    free(b->name); free(b->path); free(b->isdir); free(b);
+    for (int i = 0; i < b->n; i++) { free(b->name[i]); free(b->path[i]); free(b->artist[i]); free(b->song[i]); }
+    free(b->name); free(b->path); free(b->isdir); free(b->artist); free(b->song); free(b->bpm); free(b->stars); free(b->tag); free(b->ord); free(b);
 }
 
-static void blist_add(blist_t *b, int *cap, const char *name, const char *path, int isdir) {
+/* an entry with what its row shows (artist/song NULL: the name) */
+static void blist_add_t(blist_t *b, int *cap, const char *name, const char *path, int isdir,
+                        const char *artist, const char *song, float bpm) {
     if (b->n >= BR_MAX) return;
     if (b->n == *cap) {
         *cap = *cap ? *cap * 2 : 64;
         b->name = realloc(b->name, sizeof(char *) * *cap);
         b->path = realloc(b->path, sizeof(char *) * *cap);
         b->isdir = realloc(b->isdir, *cap);
+        b->artist = realloc(b->artist, sizeof(char *) * *cap);
+        b->song = realloc(b->song, sizeof(char *) * *cap);
+        b->bpm = realloc(b->bpm, sizeof(float) * *cap);
+        b->stars = realloc(b->stars, *cap);
+        b->tag = realloc(b->tag, *cap);
+        b->ord = realloc(b->ord, sizeof(int) * *cap);
     }
     b->name[b->n] = strdup(name); b->path[b->n] = strdup(path); b->isdir[b->n] = (char)isdir;
+    b->artist[b->n] = strdup(artist ? artist : ""); b->song[b->n] = strdup(song ? song : name);
+    b->bpm[b->n] = bpm > 0 && bpm < 400 ? bpm : 0; b->ord[b->n] = b->n; b->stars[b->n] = 0; b->tag[b->n] = TAG_NONE;
     b->n++;
+}
+
+/* Put the tracks in another order (folders stay first, in their own order). Ties, and tracks without the thing sorted
+ * by (no artist, no tempo), keep the folder's order, the latter at the end. */
+static int g_sort_mode; static const blist_t *g_sort_list;   /* qsort has no context argument; under g_sort_mu */
+static pthread_mutex_t g_sort_mu = PTHREAD_MUTEX_INITIALIZER;
+static int blist_cmp(const void *a, const void *b) {
+    const blist_t *l = g_sort_list; int i = *(const int *)a, j = *(const int *)b, c = 0;
+    if (l->isdir[i] != l->isdir[j]) return l->isdir[j] - l->isdir[i];
+    if (!l->isdir[i]) switch (g_sort_mode) {
+    case BR_SORT_ARTIST:
+        if (!l->artist[i][0] != !l->artist[j][0]) return !l->artist[i][0] ? 1 : -1;
+        if (!(c = strcasecmp(l->artist[i], l->artist[j]))) c = strcasecmp(l->song[i], l->song[j]);
+        break;
+    case BR_SORT_TITLE: c = strcasecmp(l->song[i], l->song[j]); break;
+    case BR_SORT_BPM:
+        if (!(l->bpm[i] > 0) != !(l->bpm[j] > 0)) return l->bpm[i] > 0 ? -1 : 1;
+        c = l->bpm[i] < l->bpm[j] ? -1 : l->bpm[i] > l->bpm[j];
+        break;
+    case BR_SORT_STARS_HI: c = l->stars[j] - l->stars[i]; break;   /* most stars first, unrated last */
+    case BR_SORT_STARS_LO: c = l->stars[i] - l->stars[j]; break;   /* unrated and fewest first */
+    }
+    return c ? c : l->ord[i] - l->ord[j];
+}
+
+static void blist_sort(blist_t *b, int mode) {
+    if (!b || mode < 0 || mode >= BR_SORTS) return;
+    b->sort = mode;
+    if (b->n < 2) return;
+    int *ix = malloc(sizeof(int) * b->n);
+    void **tmp = malloc(sizeof(void *) * b->n);
+    float *tf = malloc(sizeof(float) * b->n);
+    char *tc = malloc(b->n);
+    int *ti = malloc(sizeof(int) * b->n);
+    if (!ix || !tmp || !tf || !tc || !ti) { free(ix); free(tmp); free(tf); free(tc); free(ti); return; }
+    for (int i = 0; i < b->n; i++) ix[i] = i;
+    pthread_mutex_lock(&g_sort_mu);
+    g_sort_mode = mode; g_sort_list = b;
+    qsort(ix, b->n, sizeof *ix, blist_cmp);
+    pthread_mutex_unlock(&g_sort_mu);
+#define PERMUTE(arr, t) do { for (int i = 0; i < b->n; i++) t[i] = b->arr[ix[i]]; for (int i = 0; i < b->n; i++) b->arr[i] = t[i]; } while (0)
+    PERMUTE(name, tmp); PERMUTE(path, tmp); PERMUTE(artist, tmp); PERMUTE(song, tmp);
+    PERMUTE(isdir, tc); PERMUTE(bpm, tf); PERMUTE(ord, ti); PERMUTE(stars, tc); PERMUTE(tag, tc);
+#undef PERMUTE
+    free(ix); free(tmp); free(tf); free(tc); free(ti);
+}
+
+/* Tempos the decks worked out, so a folder shows them once a track has been loaded (by path, newest kept). */
+#define BPM_SEEN_MAX 512
+static struct { char *path; float bpm; } g_bpm_seen[BPM_SEEN_MAX]; static int g_nbpm_seen;
+static pthread_mutex_t g_bpm_mu = PTHREAD_MUTEX_INITIALIZER;
+static void bpm_seen_add(const char *path, double bpm) {
+    if (!path || !path[0] || !(bpm > 0)) return;
+    pthread_mutex_lock(&g_bpm_mu);
+    int i;
+    for (i = 0; i < g_nbpm_seen && strcmp(g_bpm_seen[i].path, path); i++) ;
+    if (i == g_nbpm_seen) {
+        if (g_nbpm_seen == BPM_SEEN_MAX) { free(g_bpm_seen[0].path); memmove(g_bpm_seen, g_bpm_seen + 1, sizeof g_bpm_seen[0] * (BPM_SEEN_MAX - 1)); g_nbpm_seen--; i = g_nbpm_seen; }
+        g_bpm_seen[i].path = strdup(path); g_nbpm_seen++;
+    }
+    g_bpm_seen[i].bpm = (float)bpm;
+    pthread_mutex_unlock(&g_bpm_mu);
+}
+static float bpm_seen(const char *path) {
+    float r = 0;
+    pthread_mutex_lock(&g_bpm_mu);
+    for (int i = 0; i < g_nbpm_seen; i++) if (!strcmp(g_bpm_seen[i].path, path)) r = g_bpm_seen[i].bpm;
+    pthread_mutex_unlock(&g_bpm_mu);
+    return r;
+}
+
+/* Small per-file memories kept in hidden files in the plugin's Tracks folder, by path: the start set on the START page
+ * (frames) and the stars given in the browser (1-5). They apply to the file whatever project it is loaded in. */
+#define KV_MAX 4000
+typedef struct { const char *file; struct { char *path; double v; } e[KV_MAX]; int n, loaded; char at[1200]; } kv_t;
+static kv_t g_starts = { ".mpseejay-starts.txt" }, g_stars = { ".mpseejay-stars.txt" }, g_tags = { ".mpseejay-tags.txt" };
+#define START_FILE ".mpseejay-starts.txt"
+static pthread_mutex_t g_kv_mu = PTHREAD_MUTEX_INITIALIZER;
+static void kv_load_locked(kv_t *k, const char *data_dir) {
+    if (k->loaded || !data_dir || !data_dir[0]) return;
+    k->loaded = 1;
+    snprintf(k->at, sizeof k->at, "%s/%s", data_dir, k->file);
+    FILE *f = fopen(k->at, "r");
+    if (!f) return;
+    char line[1300];
+    while (k->n < KV_MAX && fgets(line, sizeof line, f)) {
+        char *tab = strchr(line, '\t'), *nl = strchr(line, '\n');
+        if (!tab) continue;
+        if (nl) *nl = 0;
+        double v = atof(line);
+        if (v < 0 || !tab[1]) continue;
+        k->e[k->n].path = strdup(tab + 1); k->e[k->n].v = v; k->n++;
+    }
+    fclose(f);
+}
+static double kv_get(kv_t *k, const char *data_dir, const char *path) {
+    double r = -1;
+    pthread_mutex_lock(&g_kv_mu);
+    kv_load_locked(k, data_dir);
+    for (int i = 0; i < k->n; i++) if (!strcmp(k->e[i].path, path)) r = k->e[i].v;
+    pthread_mutex_unlock(&g_kv_mu);
+    return r;
+}
+/* v < 0: forget it */
+static void kv_put(kv_t *k, const char *data_dir, const char *path, double v) {
+    pthread_mutex_lock(&g_kv_mu);
+    kv_load_locked(k, data_dir);
+    int i;
+    for (i = 0; i < k->n && strcmp(k->e[i].path, path); i++) ;
+    if (v < 0) {
+        if (i < k->n) { free(k->e[i].path); k->e[i] = k->e[--k->n]; }
+    } else {
+        if (i == k->n) {
+            if (k->n == KV_MAX) { free(k->e[0].path); memmove(k->e, k->e + 1, sizeof k->e[0] * (KV_MAX - 1)); k->n--; i = k->n; }
+            k->e[i].path = strdup(path); k->n++;
+        }
+        k->e[i].v = v;
+    }
+    pthread_mutex_unlock(&g_kv_mu);
+}
+/* written by the worker (JOB_SAVE): a new file, then renamed over the old one */
+static void kv_save(kv_t *k) {
+    pthread_mutex_lock(&g_kv_mu);
+    if (k->at[0]) {
+        char tmp[1300]; snprintf(tmp, sizeof tmp, "%s.new", k->at);
+        FILE *f = fopen(tmp, "w");
+        if (f) {
+            for (int i = 0; i < k->n; i++) fprintf(f, "%.0f\t%s\n", k->e[i].v, k->e[i].path);
+            if (fclose(f) == 0) rename(tmp, k->at); else remove(tmp);
+        }
+    }
+    pthread_mutex_unlock(&g_kv_mu);
+}
+static double start_get(const char *data_dir, const char *path) { return kv_get(&g_starts, data_dir, path); }
+static void start_put(const char *data_dir, const char *path, double fr) { kv_put(&g_starts, data_dir, path, fr); }
+static void starts_save(void) { kv_save(&g_starts); kv_save(&g_stars); kv_save(&g_tags); }
+
+/* ID3v2 text (TPE1 artist, TIT2 title, TBPM) at the start of an MP3, as UTF-8; the rest of the tag is skipped. */
+static void id3_text(const unsigned char *s, size_t n, char *out, int on) {
+    int w = 0; out[0] = 0;
+    if (n < 1 || on < 2) return;
+    int enc = s[0]; s++; n--;
+    if (enc == 0 || enc == 3) {   /* Latin-1 or UTF-8 */
+        for (size_t i = 0; i < n && s[i] && w < on - 4; i++) {
+            if (enc == 3 || s[i] < 0x80) { if (s[i] >= 0x20 || s[i] >= 0x80) out[w++] = (char)s[i]; }
+            else { out[w++] = (char)(0xC0 | s[i] >> 6); out[w++] = (char)(0x80 | (s[i] & 0x3F)); }
+        }
+        out[w] = 0; return;
+    }
+    int be = enc == 2;
+    size_t i = 0;
+    if (enc == 1 && n >= 2) { if (s[0] == 0xFE && s[1] == 0xFF) be = 1; if ((s[0] == 0xFE && s[1] == 0xFF) || (s[0] == 0xFF && s[1] == 0xFE)) i = 2; }
+    for (; i + 1 < n; i += 2) {
+        uint32_t c = be ? (uint32_t)s[i] << 8 | s[i + 1] : (uint32_t)s[i + 1] << 8 | s[i];
+        if (!c) break;
+        if (c >= 0xD800 && c < 0xDC00 && i + 3 < n) {
+            uint32_t c2 = be ? (uint32_t)s[i + 2] << 8 | s[i + 3] : (uint32_t)s[i + 3] << 8 | s[i + 2];
+            if (c2 >= 0xDC00 && c2 < 0xE000) { c = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00); i += 2; }
+        }
+        u8put(out, on, &w, c);
+    }
+    out[w < on ? w : on - 1] = 0;
+}
+
+static void id3_read(const char *path, char *artist, char *song, int on, float *bpm) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    unsigned char h[10];
+    if (fread(h, 1, 10, f) != 10 || memcmp(h, "ID3", 3) || (h[3] != 3 && h[3] != 4) || (h[5] & 0x80)) { fclose(f); return; }
+    size_t size = (size_t)(h[6] & 0x7F) << 21 | (size_t)(h[7] & 0x7F) << 14 | (size_t)(h[8] & 0x7F) << 7 | (h[9] & 0x7F);
+    if (size > 65536) size = 65536;   /* the text frames come first; skip big tags' pictures */
+    unsigned char *t = malloc(size ? size : 1);
+    size_t got = t ? fread(t, 1, size, f) : 0;
+    fclose(f);
+    size_t at = 0;
+    if (t && (h[5] & 0x40) && got >= 4) {   /* an extended header */
+        size_t x = h[3] == 4 ? (size_t)(t[0] & 0x7F) << 21 | (size_t)(t[1] & 0x7F) << 14 | (size_t)(t[2] & 0x7F) << 7 | (t[3] & 0x7F)
+                             : ((size_t)t[0] << 24 | (size_t)t[1] << 16 | (size_t)t[2] << 8 | t[3]) + 4;
+        at = x;
+    }
+    while (t && at + 10 <= got && t[at] >= 'A' && t[at] <= 'Z') {
+        size_t fs = h[3] == 4 ? (size_t)(t[at + 4] & 0x7F) << 21 | (size_t)(t[at + 5] & 0x7F) << 14 | (size_t)(t[at + 6] & 0x7F) << 7 | (t[at + 7] & 0x7F)
+                              : (size_t)t[at + 4] << 24 | (size_t)t[at + 5] << 16 | (size_t)t[at + 6] << 8 | t[at + 7];
+        if (fs > got - at - 10) break;
+        const unsigned char *body = t + at + 10;
+        if (!(t[at + 9] & 0x0F)) {   /* not compressed, encrypted or unsynchronised per frame */
+            if (!memcmp(t + at, "TPE1", 4)) id3_text(body, fs, artist, on);
+            else if (!memcmp(t + at, "TIT2", 4)) id3_text(body, fs, song, on);
+            else if (!memcmp(t + at, "TBPM", 4)) { char v[32]; id3_text(body, fs, v, sizeof v); float b = (float)atof(v); if (b > 0 && b < 400) *bpm = b; }
+        }
+        at += 10 + fs;
+    }
+    free(t);
+}
+
+/* A file's artist, title and tempo: the MP3's ID3 tag, else its name ("Artist - Title.mp3"); a tempo the decks found. */
+static void file_meta(const char *path, const char *name, char *artist, char *song, int on, float *bpm) {
+    artist[0] = song[0] = 0; *bpm = 0;
+    char base[512];
+    snprintf(base, sizeof base, "%s", name);
+    char *dot = strrchr(base, '.');
+    if (dot && dot != base) *dot = 0;
+    char *dash = strstr(base, " - ");
+    if (dash) { *dash = 0; snprintf(artist, on, "%s", base); snprintf(song, on, "%s", dash + 3); }
+    else snprintf(song, on, "%s", base);
+    const char *ext = strrchr(name, '.');
+    if (ext && !strcasecmp(ext, ".mp3")) {
+        char a[256] = "", s[256] = "";
+        id3_read(path, a, s, sizeof a, bpm);
+        if (s[0]) { snprintf(song, on, "%s", s); if (a[0] || !dash) snprintf(artist, on, "%s", a); }
+        else if (a[0]) snprintf(artist, on, "%s", a);
+    }
+    float seen = bpm_seen(path);
+    if (seen > 0) *bpm = seen;
 }
 
 static int is_dir(const char *p) { struct stat st; return !stat(p, &st) && S_ISDIR(st.st_mode); }
 
-/* The top level: the plugin's own Tracks folder, $DECKS_DIR (desktop tests) and every drive under /media. */
-static void root_entries(const char *data_dir, blist_t *b, int *cap) {
-    if (data_dir && data_dir[0] && is_dir(data_dir)) blist_add(b, cap, "Decks Tracks folder", data_dir, 1);
+/* ---------- rekordbox playlists ----------
+ * A drive with a rekordbox USB export (PIONEER/rekordbox/export.pdb) gets a second top-level entry, "<drive>: REKORDBOX",
+ * whose folders are the export's playlist folders and playlists. The browser's folder paths for these are virtual:
+ * "rb:<node>:<drive root>", node 0 being the top of the playlist tree. A playlist lists its tracks, in order, as
+ * "Artist - Title"; their paths are the real files, so loading, played and on-deck marks work as in the folders. */
+#define RB_PDB "/PIONEER/rekordbox/export.pdb"
+
+static int has_rekordbox(const char *root) {
+    char p[1200]; struct stat st;
+    snprintf(p, sizeof p, "%s" RB_PDB, root);
+    return !stat(p, &st) && S_ISREG(st.st_mode);
+}
+
+/* "rb:<node>:<root>" -> node and root; 0 when dir isn't one */
+static int rb_parse(const char *dir, uint32_t *node, const char **root) {
+    if (strncmp(dir, "rb:", 3)) return 0;
+    char *e;
+    unsigned long v = strtoul(dir + 3, &e, 10);
+    if (e == dir + 3 || *e != ':' || e[1] != '/') return 0;
+    *node = (uint32_t)v; *root = e + 1;
+    return 1;
+}
+
+static int rb_node_cmp(const void *a, const void *b) {
+    const rb_node_t *x = a, *y = b;
+    if (x->sort != y->sort) return x->sort < y->sort ? -1 : 1;
+    return strcasecmp(x->name, y->name);
+}
+
+static void rb_list_dir(blist_t *b, int *cap) {
+    uint32_t node; const char *root;
+    if (!rb_parse(b->dir, &node, &root)) return;
+    const char *dn = strrchr(root, '/');
+    dn = dn && dn[1] ? dn + 1 : root;
+    char pp[1200];
+    snprintf(pp, sizeof pp, "%s" RB_PDB, root);
+    pdb_t p;
+    if (pdb_open(&p, pp)) { snprintf(b->title, sizeof b->title, "%s > REKORDBOX: CAN'T READ THE EXPORT", dn); return; }
+    rb_node_t *nodes = NULL;
+    int nn = rb_nodes(&p, &nodes), me = -1;
+    for (int i = 0; i < nn; i++) if (nodes[i].id == node) me = i;
+    if (node && me >= 0) snprintf(b->parent, sizeof b->parent, "rb:%u:%s", nodes[me].parent, root);
+    /* the path line: DJ STICK > REKORDBOX > folder > playlist */
+    int chain[8], nc = 0;
+    for (int at = me; at >= 0 && nc < 8; ) {
+        chain[nc++] = at;
+        int up = -1;
+        for (int i = 0; i < nn; i++) if (nodes[i].id == nodes[at].parent && nodes[at].parent) up = i;
+        at = up;
+    }
+    int w = snprintf(b->title, sizeof b->title, "%s > REKORDBOX", dn);
+    for (int i = nc - 1; i >= 0 && w < (int)sizeof b->title; i--)
+        w += snprintf(b->title + w, sizeof b->title - w, " > %s", nodes[chain[i]].name);
+    if (node == 0 || (me >= 0 && nodes[me].folder)) {
+        rb_node_t *kids = malloc(sizeof *kids * (nn ? nn : 1));
+        int nk = 0;
+        for (int i = 0; kids && i < nn; i++) if (nodes[i].parent == node && nodes[i].id != node) kids[nk++] = nodes[i];
+        if (nk > 1) qsort(kids, nk, sizeof *kids, rb_node_cmp);
+        for (int i = 0; i < nk; i++) {
+            char path[1200];
+            snprintf(path, sizeof path, "rb:%u:%s", kids[i].id, root);
+            blist_add_t(b, cap, kids[i].name, path, 1, kids[i].folder ? "FOLDER" : "PLAYLIST", NULL, 0);
+        }
+        free(kids);
+    } else {
+        rb_entry_t *en = NULL;
+        int ne = rb_entries(&p, node, &en);
+        uint32_t *ids = malloc(sizeof *ids * (ne ? ne : 1));
+        rb_track_t *tr = calloc(ne ? ne : 1, sizeof *tr);
+        if (ids && tr) {
+            for (int i = 0; i < ne; i++) ids[i] = en[i].track;
+            rb_tracks(&p, ids, ne, tr);
+            for (int i = 0; i < ne; i++) {
+                if (tr[i].path[0] != '/') continue;
+                char path[2300], name[420];
+                snprintf(path, sizeof path, "%s%s", root, tr[i].path);
+                if (!is_audio(path) || access(path, R_OK)) continue;   /* WAV and MP3 that are on the stick */
+                if (tr[i].artist[0]) snprintf(name, sizeof name, "%s - %s", tr[i].artist, tr[i].title[0] ? tr[i].title : "?");
+                else if (tr[i].title[0]) snprintf(name, sizeof name, "%s", tr[i].title);
+                else { const char *f = strrchr(path, '/'); snprintf(name, sizeof name, "%s", f ? f + 1 : path); }
+                float bpm = tr[i].bpm > 0 ? tr[i].bpm : bpm_seen(path);
+                blist_add_t(b, cap, name, path, 0, tr[i].artist, tr[i].title[0] ? tr[i].title : name, bpm);
+                if (b->n && !strcmp(b->path[b->n - 1], path)) b->stars[b->n - 1] = (char)tr[i].rating;
+            }
+        }
+        free(ids); free(tr); free(en);
+    }
+    free(nodes);
+    pdb_close(&p);
+}
+
+/* The browser's top is in two sections: FOLDERS ("folders:", every drive and its folders) and a REKORDBOX entry per
+ * drive with a rekordbox export (its playlists). */
+#define BR_FOLDERS "folders:"
+
+/* The drives: the plugin's own Tracks folder, $DECKS_DIR (desktop tests) and every drive under /media.
+ * rb: only the drives with a rekordbox export, as REKORDBOX entries. */
+static void drive_entries(const char *data_dir, blist_t *b, int *cap, int rb) {
+    char *names[66], *paths[66]; int nn = 0;
+    if (!rb && data_dir && data_dir[0] && is_dir(data_dir)) blist_add_t(b, cap, "Decks Tracks folder", data_dir, 1, "THE PLUGIN'S OWN TRACKS FOLDER", NULL, 0);
     const char *env = getenv("DECKS_DIR");
     if (env && *env && is_dir(env)) {
         const char *base = strrchr(env, '/');
-        blist_add(b, cap, base && base[1] ? base + 1 : env, env, 1);
+        names[nn] = strdup(base && base[1] ? base + 1 : env); paths[nn++] = strdup(env);
     }
     DIR *m = opendir("/media");
-    if (!m) return;
-    char *names[64]; int nn = 0;
-    struct dirent *e;
-    while ((e = readdir(m)) && nn < 64) {
-        if (e->d_name[0] == '.' || !strncmp(e->d_name, "acvs", 4)) continue;   /* hidden, and MPC's own system mounts */
-        names[nn++] = strdup(e->d_name);
+    if (m) {
+        int first = nn;
+        struct dirent *e;
+        while ((e = readdir(m)) && nn < 64) {
+            if (e->d_name[0] == '.' || !strncmp(e->d_name, "acvs", 4)) continue;   /* hidden, and MPC's own system mounts */
+            char p[512]; snprintf(p, sizeof p, "/media/%s", e->d_name);
+            if (!is_dir(p)) continue;
+            names[nn] = strdup(e->d_name); paths[nn++] = strdup(p);
+        }
+        closedir(m);
+        for (int i = first; i < nn; i++) for (int j = i + 1; j < nn; j++) if (strcasecmp(names[j], names[i]) < 0) {
+            char *t = names[i]; names[i] = names[j]; names[j] = t; t = paths[i]; paths[i] = paths[j]; paths[j] = t;
+        }
     }
-    closedir(m);
-    for (int i = 0; i < nn; i++) for (int j = i + 1; j < nn; j++) if (strcasecmp(names[j], names[i]) < 0) { char *t = names[i]; names[i] = names[j]; names[j] = t; }
+    int nrb = 0;
+    for (int i = 0; rb && i < nn; i++) nrb += has_rekordbox(paths[i]);
     for (int i = 0; i < nn; i++) {
-        char p[512]; snprintf(p, sizeof p, "/media/%s", names[i]);
-        if (is_dir(p)) blist_add(b, cap, names[i], p, 1);
-        free(names[i]);
+        if (!rb) blist_add_t(b, cap, names[i], paths[i], 1, "DRIVE", NULL, 0);
+        else if (has_rekordbox(paths[i])) {
+            char nm[300], rp[1200], what[300];
+            if (nrb > 1) snprintf(nm, sizeof nm, "REKORDBOX: %s", names[i]); else snprintf(nm, sizeof nm, "REKORDBOX");
+            snprintf(rp, sizeof rp, "rb:0:%s", paths[i]);
+            snprintf(what, sizeof what, "PLAYLISTS ON %s", names[i]);
+            blist_add_t(b, cap, nm, rp, 1, what, NULL, 0);
+        }
+        free(names[i]); free(paths[i]);
     }
+}
+
+static void root_entries(const char *data_dir, blist_t *b, int *cap) {
+    blist_t *t = calloc(1, sizeof *t); int tc = 0;
+    if (t) drive_entries(data_dir, t, &tc, 0);
+    int any = t && t->n;
+    if (any) blist_add_t(b, cap, "FOLDERS", BR_FOLDERS, 1, "EVERY DRIVE AND ITS FOLDERS", NULL, 0);   /* none: nothing at all */
+    blist_free(t);
+    drive_entries(data_dir, b, cap, 1);
+    if (!any) return;
+    blist_add_t(b, cap, "CHILL", "tag:1", 1, "EVERY TRACK SWITCHED TO CHILL", NULL, 0);
+    blist_add_t(b, cap, "HYPE", "tag:2", 1, "EVERY TRACK SWITCHED TO HYPE", NULL, 0);
+}
+
+/* "tag:1" / "tag:2": every track switched to CHILL / HYPE, from any drive or playlist (the ones still there) */
+static void tag_list_dir(const char *data_dir, blist_t *b, int *cap) {
+    int want = b->dir[4] - '0';
+    snprintf(b->title, sizeof b->title, "%s", want == TAG_CHILL ? "CHILL" : "HYPE");
+    char **paths = NULL; int np = 0;
+    pthread_mutex_lock(&g_kv_mu);
+    kv_load_locked(&g_tags, data_dir);
+    paths = malloc(sizeof(char *) * (g_tags.n ? g_tags.n : 1));
+    for (int i = 0; paths && i < g_tags.n; i++) if ((int)g_tags.e[i].v == want) paths[np++] = strdup(g_tags.e[i].path);
+    pthread_mutex_unlock(&g_kv_mu);
+    for (int i = 0; i < np; i++) {
+        const char *nm = strrchr(paths[i], '/');
+        nm = nm ? nm + 1 : paths[i];
+        if (is_audio(nm) && !access(paths[i], R_OK)) {
+            char a[256], t[256]; float bpm;
+            file_meta(paths[i], nm, a, t, sizeof a, &bpm);
+            blist_add_t(b, cap, nm, paths[i], 0, a, t, bpm);
+        }
+        free(paths[i]);
+    }
+    free(paths);
 }
 
 typedef struct { char *name; int isdir; } bent_t;
@@ -194,9 +605,12 @@ static blist_t *list_dir(const char *data_dir, const char *dir) {
     int cap = 0;
     snprintf(b->dir, sizeof b->dir, "%s", dir);
     if (!dir[0]) { root_entries(data_dir, b, &cap); return b; }
-    /* UP from a top-level folder goes back to the drives */
+    if (!strncmp(dir, "rb:", 3)) { rb_list_dir(b, &cap); return b; }
+    if (!strncmp(dir, "tag:", 4)) { tag_list_dir(data_dir, b, &cap); return b; }
+    if (!strcmp(dir, BR_FOLDERS)) { drive_entries(data_dir, b, &cap, 0); snprintf(b->title, sizeof b->title, "FOLDERS"); return b; }
+    /* UP from a drive goes back to the drives */
     blist_t *top = calloc(1, sizeof *top); int tc = 0;
-    root_entries(data_dir, top, &tc);
+    drive_entries(data_dir, top, &tc, 0);
     int at_top = 0;
     for (int i = 0; i < top->n; i++) if (!strcmp(top->path[i], dir)) at_top = 1;
     blist_free(top);
@@ -204,7 +618,7 @@ static blist_t *list_dir(const char *data_dir, const char *dir) {
         snprintf(b->parent, sizeof b->parent, "%s", dir);
         char *sl = strrchr(b->parent, '/');
         if (sl && sl != b->parent) *sl = 0; else b->parent[0] = 0;
-    }
+    } else snprintf(b->parent, sizeof b->parent, BR_FOLDERS);
     DIR *dd = opendir(dir);
     if (!dd) return b;
     bent_t *ents = NULL; int n = 0, ecap = 0;
@@ -224,7 +638,12 @@ static blist_t *list_dir(const char *data_dir, const char *dir) {
     qsort(ents, n, sizeof *ents, bent_cmp);
     for (int i = 0; i < n; i++) {
         char p[1024]; snprintf(p, sizeof p, "%s/%s", dir, ents[i].name);
-        blist_add(b, &cap, ents[i].name, p, ents[i].isdir);
+        if (ents[i].isdir) blist_add_t(b, &cap, ents[i].name, p, 1, "FOLDER", NULL, 0);
+        else {
+            char a[256], t[256]; float bpm;
+            file_meta(p, ents[i].name, a, t, sizeof a, &bpm);
+            blist_add_t(b, &cap, ents[i].name, p, 0, a, t, bpm);
+        }
         free(ents[i].name);
     }
     free(ents);
@@ -252,9 +671,11 @@ static int16_t *decode(const char *path, int64_t *frames_out, int *cut) {
                     if (!nr) break;
                     raw = nr; cap = nc;
                 }
-                uint64_t got = drmp3_read_pcm_frames_s16(&mp3, cap - fr, raw + fr * ch);
+                uint64_t ask = cap - fr < (uint64_t)rate * 2 ? cap - fr : (uint64_t)rate * 2;
+                uint64_t got = drmp3_read_pcm_frames_s16(&mp3, ask, raw + fr * ch);
                 if (!got) break;
                 fr += got;
+                load_breathe();
             }
         }
         drmp3_uninit(&mp3);
@@ -266,7 +687,13 @@ static int16_t *decode(const char *path, int64_t *frames_out, int *cut) {
             uint64_t want = wav.totalPCMFrameCount, maxin = (uint64_t)MAX_SECONDS * rate;
             if (want > maxin) { want = maxin; *cut = 1; }
             if (want) raw = malloc((size_t)want * ch * sizeof(int16_t));
-            if (raw) fr = drwav_read_pcm_frames_s16(&wav, want, raw);
+            while (raw && fr < want) {   /* a couple of seconds at a time */
+                uint64_t n = want - fr < (uint64_t)rate * 2 ? want - fr : (uint64_t)rate * 2;
+                uint64_t got = drwav_read_pcm_frames_s16(&wav, n, raw + fr * ch);
+                if (!got) break;
+                fr += got;
+                load_breathe();
+            }
         }
         drwav_uninit(&wav);
     }
@@ -276,6 +703,7 @@ static int16_t *decode(const char *path, int64_t *frames_out, int *cut) {
     if (out) {
         double step = (double)rate / SR;
         for (int64_t i = 0; i < out_n; i++) {
+            if (i % BREATHE_FRAMES == BREATHE_FRAMES - 1) load_breathe();
             double sp = i * step;
             int64_t a = (int64_t)sp; double f = sp - a;
             if (a >= (int64_t)fr) a = (int64_t)fr - 1;
@@ -304,6 +732,7 @@ void deck_analyse(const int16_t *pcm, int64_t frames, double *bpm_out, double *a
     float lp = 0, prev_lo = 0, prev_all = 0;
     const float a = 1.0f - expf(-2.0f * (float)M_PI * 150.0f / SR);
     for (int64_t h = 0; h < nh; h++) {
+        if ((h & 255) == 255) load_breathe();
         double elo = 0, eall = 0;
         for (int i = 0; i < HOP; i++) {
             const int16_t *s = pcm + (h * HOP + i) * 2;
@@ -374,6 +803,7 @@ static void wave_overview(const int16_t *pcm, int64_t frames, uint8_t *wf) {
     for (int c = 0; c < WF_COLS; c++) {
         int64_t a = frames * c / WF_COLS, b = frames * (c + 1) / WF_COLS;
         int m = 0;
+        load_breathe();
         for (int64_t i = a; i < b; i += 4) {   /* every 4th frame is plenty for a bar */
             int v = abs(pcm[i * 2] + pcm[i * 2 + 1]) / 2;
             if (v > m) m = v;
@@ -388,7 +818,8 @@ static void wave_overview(const int16_t *pcm, int64_t frames, uint8_t *wf) {
 
 /* ---------- the deck ---------- */
 
-enum { JOB_NONE = 0, JOB_SCAN = 1, JOB_LOAD = 2, JOB_LIST = 4, JOB_EJECT = 8 };
+enum { JOB_NONE = 0, JOB_SCAN = 1, JOB_LOAD = 2, JOB_LIST = 4, JOB_EJECT = 8, JOB_STARTS = 16 };
+#define ZW_COLS 80   /* the START page's waveform: columns */
 
 struct deck {
     char data_dir[1024];
@@ -410,6 +841,18 @@ struct deck {
     int sel, top;            /* selected entry, first row shown */
     double last_tap;         /* row taps: MPC sends two presses per tap */
     int browse;              /* the browser panel is open */
+    int br_sort;             /* SORT: BR_SORT_* (ORDER, ARTIST, TITLE, BPM) */
+    int edit;                /* the START page is open (tap the waveform; it takes the deck view's place) */
+    double start;            /* where the track starts: the cue it loads with (frames) */
+    double start_auto;       /* where the automatic start put it (past a silent intro) */
+    int start_set;           /* start was set by hand on the START page (remembered for this file) */
+    int st_zoom;             /* the START page's view: 0 4 s, 1 16 s, 2 64 s */
+    /* a MIDI fader learned as this deck's pitch fader (SETUP: LEARN PITCH FADER) */
+    int pf_cc;               /* channel * 128 + CC, -1 = none */
+    int pf_learn, pf_dir;    /* waiting for a CC; pf_dir 1: fader up = slower (as on a CDJ) */
+    int pf_picked; float pf_prev;   /* soft takeover: the fader has met the pitch since it last moved by other means */
+    uint8_t zw[ZW_COLS]; double zw_from; int zw_ok;   /* its waveform, from zw_from (frames), for zw_key */
+    double zw_key[2]; const void *zw_t;
 
     /* audio thread */
     track_t *t;
@@ -496,7 +939,7 @@ static int g_learn;
 static unsigned g_learn_rev;
 /* the log and the pad lights (defined further down, beside set_param) */
 #ifndef DECKS_VERSION
-#define DECKS_VERSION 1100
+#define DECKS_VERSION 1300
 #endif
 static int g_debug;
 static void dbg_sync(int sync, const char *fmt, ...);
@@ -540,6 +983,9 @@ static double now_s(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &
 
 static void *worker(void *arg) {
     deck_t *d = arg;
+#ifdef __linux__
+    setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);   /* behind the audio, and behind MPC's own work */
+#endif
     pthread_mutex_lock(&d->mu);
     while (!d->quit) {
         if (d->garbage) {   /* an old track: kept 2 s in the grave first, since another deck's screen may be reading it */
@@ -570,6 +1016,13 @@ static void *worker(void *arg) {
             snprintf(want, sizeof want, "%s", d->br_req_sel);
             pthread_mutex_unlock(&d->mu);
             blist_t *b = list_dir(d->data_dir, dir), *old;
+            for (int i = 0; i < b->n; i++) if (!b->isdir[i]) {   /* stars given here win over rekordbox's */
+                double v = kv_get(&g_stars, d->data_dir, b->path[i]);
+                if (v >= 0) b->stars[i] = (char)(v > 5 ? 5 : v);
+                v = kv_get(&g_tags, d->data_dir, b->path[i]);
+                if (v == TAG_CHILL || v == TAG_HYPE) b->tag[i] = (char)v;
+            }
+            blist_sort(b, d->br_sort);
             int s = 0;
             for (int i = 0; want[0] && i < b->n; i++) if (!strcmp(b->name[i], want) || !strcmp(b->path[i], want)) { s = i; break; }
             pthread_mutex_lock(&d->mu);
@@ -579,6 +1032,13 @@ static void *worker(void *arg) {
             d->rev++;
             pthread_mutex_unlock(&d->mu);
             blist_free(old);
+            pthread_mutex_lock(&d->mu);
+            continue;
+        }
+        if (d->jobs & JOB_STARTS) {
+            d->jobs &= ~JOB_STARTS;
+            pthread_mutex_unlock(&d->mu);
+            starts_save();
             pthread_mutex_lock(&d->mu);
             continue;
         }
@@ -616,6 +1076,9 @@ static void *worker(void *arg) {
                 snprintf(t->name, sizeof t->name, "%s", name);
                 snprintf(t->path, sizeof t->path, "%s", path);
                 deck_analyse(pcm, fr, &t->bpm, &t->anchor);
+                bpm_seen_add(path, t->bpm);
+                t->sound = first_sound(pcm, fr);
+                t->mine = start_get(d->data_dir, path);
                 wave_overview(pcm, fr, t->wf);
             }
             pthread_mutex_lock(&d->mu);
@@ -690,12 +1153,12 @@ static void br_select(deck_t *d, int i) {
     d->rev++;
 }
 
-/* LOAD, or a tap on the selected row: open a folder, or load a file and close the browser. */
+/* LOAD, or a tap on the selected row: open a folder, or load a file (the browser stays open). */
 static int load_guard(deck_t *d, int to, int playing);
 static void br_activate(deck_t *d) {
     if (!d->bl || d->sel < 0 || d->sel >= d->bl->n) return;
     if (d->bl->isdir[d->sel]) br_open_dir(d, d->bl->path[d->sel], NULL);
-    else if (load_guard(d, d->deck_id, d->playing && !d->previewing)) { load_path(d, d->bl->path[d->sel]); d->browse = 0; d->rev++; }
+    else if (load_guard(d, d->deck_id, d->playing && !d->previewing)) { load_path(d, d->bl->path[d->sel]); d->rev++; }   /* the browser stays open (1.3) */
 }
 
 /* Browser moves, for the screen's controls and the pads (these take mu themselves). */
@@ -719,6 +1182,56 @@ static void br_page(deck_t *d, int dn) {
 static void br_back(deck_t *d) {
     pthread_mutex_lock(&d->mu);
     if (d->bl && d->bl->dir[0]) br_open_dir(d, d->bl->parent, d->bl->dir);
+    pthread_mutex_unlock(&d->mu);
+}
+
+/* SORT: re-sort the folder on screen, the same entry kept selected (takes mu) */
+/* STARS - / +: the selected track's stars (0-5), remembered for the file (takes mu) */
+static void br_rate(deck_t *d, int delta) {
+    char path[1024] = ""; int r = 0;
+    pthread_mutex_lock(&d->mu);
+    if (d->bl && d->sel >= 0 && d->sel < d->bl->n && !d->bl->isdir[d->sel]) {
+        r = d->bl->stars[d->sel] + delta;
+        if (r < 0) r = 0;
+        if (r > 5) r = 5;
+        d->bl->stars[d->sel] = (char)r;
+        snprintf(path, sizeof path, "%s", d->bl->path[d->sel]);
+    }
+    pthread_mutex_unlock(&d->mu);
+    if (!path[0]) return;
+    kv_put(&g_stars, d->data_dir, path, r);   /* first, so the save that follows has it */
+    pthread_mutex_lock(&d->mu); post(d, JOB_STARTS); d->rev++; pthread_mutex_unlock(&d->mu);
+}
+
+/* CHILL / HYPE: switch the selected track to one (again: neither), remembered for the file */
+static void br_tag(deck_t *d, int t) {
+    char path[1024] = ""; int now = TAG_NONE;
+    pthread_mutex_lock(&d->mu);
+    if (d->bl && d->sel >= 0 && d->sel < d->bl->n && !d->bl->isdir[d->sel]) {
+        now = d->bl->tag[d->sel] == t ? TAG_NONE : t;
+        d->bl->tag[d->sel] = (char)now;
+        snprintf(path, sizeof path, "%s", d->bl->path[d->sel]);
+    }
+    pthread_mutex_unlock(&d->mu);
+    if (!path[0]) return;
+    kv_put(&g_tags, d->data_dir, path, now ? now : -1);
+    pthread_mutex_lock(&d->mu); post(d, JOB_STARTS); d->rev++; pthread_mutex_unlock(&d->mu);
+}
+
+static void br_set_sort(deck_t *d, int m) {
+    if (m < 0 || m >= BR_SORTS) return;
+    pthread_mutex_lock(&d->mu);
+    d->br_sort = m;
+    if (d->bl && d->bl->sort != m) {
+        char *keep = d->sel >= 0 && d->sel < d->bl->n ? strdup(d->bl->path[d->sel]) : NULL;
+        blist_sort(d->bl, m);
+        int s = 0;
+        for (int i = 0; keep && i < d->bl->n; i++) if (!strcmp(d->bl->path[i], keep)) { s = i; break; }
+        free(keep);
+        d->sel = s; d->top = s >= BR_ROWS ? s - BR_ROWS / 2 : 0;
+        if (d->top > d->bl->n - BR_ROWS) d->top = d->bl->n - BR_ROWS > 0 ? d->bl->n - BR_ROWS : 0;
+    }
+    d->rev++;
     pthread_mutex_unlock(&d->mu);
 }
 
@@ -760,7 +1273,7 @@ static void br_load_to(deck_t *d, int to) {
     int ok = o && load_guard(d, to, o->playing && !o->previewing);
     if (ok) { pthread_mutex_lock(&o->mu); load_path(o, path); pthread_mutex_unlock(&o->mu); }
     pthread_mutex_unlock(&g_mu);
-    if (ok) { d->browse = 0; d->rev++; }
+    if (ok) d->rev++;   /* the browser stays open for the next track (1.3); CLOSE or pad 16 closes it */
     else if (!o) {
         snprintf(d->warn, sizeof d->warn, "NO DECK %c: ADD A SECOND MPSEEJAY TRACK", 'A' + to);
         d->warn_until = now_s() + 3.0; d->rev++;
@@ -782,17 +1295,22 @@ static void played_add(const char *path) {   /* caller holds g_mu */
 
 /* Row i (0-5) of d's browser: 0 empty, 1 folder, 2 file; *sel when selected; *on = deck letter + 1 holding it;
  * *played. Locks d->mu, then (released) g_mu, so it keeps the lock order g_mu -> mu used elsewhere. */
-static int br_row(deck_t *d, int i, int *sel, int *on, int *played, char *name, int nn) {
+static int br_row(deck_t *d, int i, int *sel, int *on, int *played, char *name, int nn, char *artist, int an, float *bpm) {
     char path[1024] = "";
     int kind = 0;
     *sel = *on = *played = 0;
+    if (name && nn) name[0] = 0;
+    if (artist && an) artist[0] = 0;
+    if (bpm) *bpm = 0;
     pthread_mutex_lock(&d->mu);
     int r = d->top + i;
     if (d->bl && r < d->bl->n) {
         kind = d->bl->isdir[r] ? 1 : 2;
         *sel = r == d->sel;
         snprintf(path, sizeof path, "%s", d->bl->path[r]);
-        if (name) snprintf(name, nn, "%s", d->bl->name[r]);
+        if (name) snprintf(name, nn, "%s", d->bl->isdir[r] ? d->bl->name[r] : d->bl->song[r]);
+        if (artist) snprintf(artist, an, "%s", d->bl->artist[r]);
+        if (bpm) *bpm = d->bl->bpm[r];
     }
     pthread_mutex_unlock(&d->mu);
     if (kind != 2) return kind;
@@ -814,8 +1332,10 @@ static int br_row(deck_t *d, int i, int *sel, int *on, int *played, char *name, 
 static void br_eject(deck_t *d) {
     char path[1024] = "";
     pthread_mutex_lock(&d->mu);
-    if (d->bl && d->bl->dir[0]) snprintf(path, sizeof path, "%s", d->bl->dir);
+    if (d->bl && d->bl->dir[0] && strcmp(d->bl->dir, BR_FOLDERS)) snprintf(path, sizeof path, "%s", d->bl->dir);
     else if (d->bl && d->sel < d->bl->n) snprintf(path, sizeof path, "%s", d->bl->path[d->sel]);
+    uint32_t rbn; const char *rbroot;
+    if (rb_parse(path, &rbn, &rbroot)) memmove(path, rbroot, strlen(rbroot) + 1);   /* rekordbox: its drive */
     if (strncmp(path, "/media/", 7)) {
         snprintf(d->warn, sizeof d->warn, "PICK A DRIVE (OR A FOLDER ON IT) TO EJECT");
     } else {
@@ -833,6 +1353,7 @@ static void *create(const char *data_dir) {
     if (data_dir) snprintf(d->data_dir, sizeof d->data_dir, "%s", data_dir);
     pthread_mutex_init(&d->mu, NULL); pthread_cond_init(&d->cv, NULL);
     d->vol = 1.0f; d->range = 0; d->loop_beats = 4; d->pad_base = 36; d->roll_note = -1; d->last_note = -1; d->park = -1;
+    d->pf_cc = -1; d->pf_prev = -9;
     d->follow = 1; d->pad_lights = 1; d->guard_to = -1; d->wf_col = -1; d->was_host_playing = -1; d->ref_deck = -2;
     pthread_mutex_init(&d->qmu, NULL);
     pthread_mutex_lock(&g_mu);
@@ -996,6 +1517,7 @@ static void tempo_step(deck_t *d, double step) {
     bpm = round(bpm * q) / q + step;
     double p = (bpm / d->bpm - 1.0) / ranges[d->range];
     d->pitch = (float)(p > 1 ? 1 : p < -1 ? -1 : p); d->rev++;
+    d->pf_picked = 0;   /* a learned pitch fader has to come back to meet the new pitch */
 }
 
 static void hold_nudge(deck_t *d, int dir) {
@@ -1014,14 +1536,20 @@ enum { PF_CUE, PF_PLAY, PF_NDN, PF_NUP, PF_SYNC, PF_JBACK, PF_JFWD, PF_LOOP, PF_
        PF_DECKA, PF_DECKB, PF_BPMUP, PF_BPMDN, PF_SHIFT, PF_BAR1, PF_HALF = PF_BAR1 + 3, PF_DOUBLE, PF_MKLEAD, PF_BPMUP1,
        PF_BPMDN1,
        /* bank B: auto loops of 1, 2, 4 and 8 beats */
-       PF_ALOOP1, PF_N = PF_ALOOP1 + 4 };
+       PF_ALOOP1,
+       /* 1.3: the browser's SORT pad */
+       PF_B_SORT = PF_ALOOP1 + 4,
+       /* the browser's STARS - / + pads */
+       PF_B_STAR_DN, PF_B_STAR_UP,
+       /* the browser's CHILL / HYPE pads */
+       PF_B_CHILL, PF_B_HYPE, PF_N };
 
-/* browser pads (pad 1 bottom left):  13 PAGE UP   14 UP     15 -      16 CLOSE
+/* browser pads (pad 1 bottom left):  13 PAGE UP   14 UP     15 SORT   16 CLOSE  (3 STARS -, 4 STARS +)
  *                                      9 BACK      10 DOWN   11 OPEN   12 -
  *                                      5 PAGE DN    6 -       7 -       8 -
  *                                      1 LOAD A     2 LOAD B  3 -       4 -       UP / DOWN repeat while held */
-static const int BROWSE_PADS[16] = {PF_B_LOADA, PF_B_LOADB, PF_B_NONE, PF_B_NONE, PF_B_PGDN, PF_B_NONE, PF_B_NONE,
-                                    PF_B_NONE, PF_B_BACK, PF_B_DOWN, PF_B_OPEN, PF_B_NONE, PF_B_PGUP, PF_B_UP, PF_B_NONE,
+static const int BROWSE_PADS[16] = {PF_B_LOADA, PF_B_LOADB, PF_B_STAR_DN, PF_B_STAR_UP, PF_B_PGDN, PF_B_NONE, PF_B_CHILL,
+                                    PF_B_HYPE, PF_B_BACK, PF_B_DOWN, PF_B_OPEN, PF_B_NONE, PF_B_PGUP, PF_B_UP, PF_B_SORT,
                                     PF_B_CLOSE};
 
 /* Deck pads (pad 1 bottom left), and with SHIFT (pad 8) held:
@@ -1062,7 +1590,7 @@ static int pad_func(const deck_t *d, int k) { return pad_func_mode(d, k, d->brow
 
 static int pad_lit(deck_t *d, int f) {
     switch (f) {
-    case PF_B_LOADA: case PF_B_LOADB: return br_sel_kind(d) == 1;
+    case PF_B_LOADA: case PF_B_LOADB: case PF_B_STAR_DN: case PF_B_STAR_UP: case PF_B_CHILL: case PF_B_HYPE: return br_sel_kind(d) == 1;
     case PF_B_OPEN: return br_sel_kind(d) == 2;
     case PF_B_NONE: return 0;
     case PF_DECKA: return d->deck_id == 0;   /* the deck the screen and pads are on */
@@ -1112,6 +1640,9 @@ static void pad_browse(deck_t *d, int f, int on) {
     case PF_B_OPEN: br_open_sel(d); break;
     case PF_B_LOADA: case PF_B_LOADB: br_load_to(d, f == PF_B_LOADB); break;
     case PF_B_CLOSE: d->browse = 0; break;
+    case PF_B_SORT: br_set_sort(d, (d->br_sort + 1) % BR_SORTS); break;   /* ORDER, ARTIST, TITLE, BPM, STARS, ORDER... */
+    case PF_B_STAR_DN: case PF_B_STAR_UP: br_rate(d, f == PF_B_STAR_UP ? 1 : -1); break;
+    case PF_B_CHILL: case PF_B_HYPE: br_tag(d, f == PF_B_HYPE ? TAG_HYPE : TAG_CHILL); break;
     }
 }
 
@@ -1207,6 +1738,71 @@ static void midi_local(void *inst, const uint8_t *msg, int len) {
 
 /* ---------- parameters ---------- */
 
+/* ---------- the START page: where the track starts (the cue it loads with), set by hand ---------- */
+static const double ZOOM_S[3] = {4, 16, 64};
+
+/* move the start to s (frames); hand: remembered for this file, else back to the automatic start */
+static void start_to(deck_t *d, double s, int hand) {
+    if (!d->t) return;
+    if (s < 0) s = 0;
+    if (s > d->t->frames - 1) s = (double)(d->t->frames - 1);
+    d->start = d->cue = s; d->start_set = hand;
+    if (!d->playing) { d->park = -1; jump(d, s); }
+    start_put(d->data_dir, d->t->path, hand ? s : -1);
+    pthread_mutex_lock(&d->mu); post(d, JOB_STARTS); pthread_mutex_unlock(&d->mu);
+    d->rev++;
+}
+
+static double start_step(const deck_t *d, int bar) {   /* a beat or a bar; half a second / 2 s without a tempo */
+    double beat = d->bpm > 0 ? 60.0 * SR / d->bpm : SR / 2.0;
+    return bar ? 4 * beat : beat;
+}
+
+static void start_key(deck_t *d, const char *k) {
+    if (!strcmp(k, "st_open")) { d->edit = 1; d->browse = 0; d->rev++; return; }
+    if (!strcmp(k, "st_done")) { d->edit = 0; d->rev++; return; }
+    if (!d->t) return;
+    if (!strcmp(k, "st_bar_dn") || !strcmp(k, "st_bar_up")) start_to(d, d->start + (k[7] == 'u' ? 1 : -1) * start_step(d, 1), 1);
+    else if (!strcmp(k, "st_beat_dn") || !strcmp(k, "st_beat_up")) start_to(d, d->start + (k[8] == 'u' ? 1 : -1) * start_step(d, 0), 1);
+    else if (!strcmp(k, "st_fine_dn") || !strcmp(k, "st_fine_up")) start_to(d, d->start + (k[8] == 'u' ? 1 : -1) * 0.01 * SR, 1);
+    else if (!strcmp(k, "st_set")) start_to(d, d->pos, 1);
+    else if (!strcmp(k, "st_auto")) start_to(d, d->start_auto, 0);
+    else if (!strcmp(k, "st_top")) start_to(d, 0, 1);
+    else if (!strcmp(k, "st_play")) {   /* play from the start; again: stop and go back to it */
+        if (d->playing && !d->previewing) { d->park = d->start; play_toggle(d, 0); }
+        else { d->park = -1; jump(d, d->start); play_toggle(d, 1); }
+    }
+}
+
+/* The START page's waveform: ZW_COLS peaks over ZOOM_S seconds, the start a quarter of the way in (or the track's top) */
+static void zw_update(deck_t *d) {
+    if (!d->t) { d->zw_ok = 0; return; }
+    double span = ZOOM_S[d->st_zoom] * SR;
+    if (d->zw_ok && d->zw_t == d->t && d->zw_key[0] == d->start && d->zw_key[1] == span) return;
+    double from = d->start - span / 4;
+    if (from > d->t->frames - span) from = d->t->frames - span;
+    if (from < 0) from = 0;
+    int pk[ZW_COLS], mx = 1;
+    for (int c = 0; c < ZW_COLS; c++) {
+        int64_t a = (int64_t)(from + span * c / ZW_COLS), b = (int64_t)(from + span * (c + 1) / ZW_COLS), m = 0;
+        int64_t step = (b - a) / 256 + 1;
+        for (int64_t i = a; i < b && i < d->t->frames; i += step) { int v = abs(d->t->pcm[i * 2] + d->t->pcm[i * 2 + 1]) / 2; if (v > m) m = v; }
+        pk[c] = (int)m;
+    }
+    for (int64_t i = 0; i < d->t->frames; i += 64) { int v = abs(d->t->pcm[i * 2] + d->t->pcm[i * 2 + 1]) / 2; if (v > mx) mx = v; }   /* the track's loudest */
+    for (int c = 0; c < ZW_COLS; c++) {
+        int l = (int)lround(sqrt((double)(pk[c] < mx ? pk[c] : mx) / mx) * (WF_LEVELS - 1));
+        d->zw[c] = (uint8_t)(pk[c] > 0 && l < 1 ? 1 : l);
+    }
+    d->zw_from = from; d->zw_key[0] = d->start; d->zw_key[1] = span; d->zw_t = d->t; d->zw_ok = 1;
+}
+
+static int fmt_frames(double fr, char *b, int n) {
+    if (fr < 0) fr = 0;
+    double sec = fr / SR;
+    return snprintf(b, n, "%d:%05.2f", (int)(sec / 60), fmod(sec, 60));
+}
+
 static void apply_restore(deck_t *d) {
     if (!d->want_valid || !d->t || strcmp(d->t->name, d->want_name)) return;
     for (int i = 0; i < NCUES; i++) d->cues[i] = d->want_cues[i];
@@ -1218,7 +1814,7 @@ static void apply_restore(deck_t *d) {
 
 /* Settings kept in the project's state chunk (the wrapper saves only this chunk). */
 static const char *SAVED[] = {"volume", "pitch", "range", "sync", "filter", "eq_low", "eq_mid", "eq_high", "loop_len",
-                              "pad_mode", "pad_base", "follow", "deck_id", "pad_set", "pad_lights", NULL};
+                              "pad_mode", "pad_base", "follow", "deck_id", "pad_set", "pad_lights", "br_sort", "pf_cc", "pf_dir", NULL};
 static void set_local(void *inst, const char *key, const char *val);
 
 static void restore_state(deck_t *d, const char *val) {
@@ -1281,8 +1877,12 @@ static void set_local(void *inst, const char *key, const char *val) {
     }
     else if (!strcmp(key, "load_a") || !strcmp(key, "load_b")) { if (v >= 0.5) br_load_to(d, key[5] - 'a'); }
     else if (!strcmp(key, "load")) { if (v >= 0.5) br_open_sel(d); }
-    else if (!strcmp(key, "browse")) { d->browse = (int)v ? 1 : 0; d->rev++; }
-    else if (!strcmp(key, "br_open")) { if (v >= 0.5) { d->browse = 1; d->rev++; } }
+    else if (!strcmp(key, "browse")) { int m = (int)lround(v); d->edit = m == 2; d->browse = m == 1; d->rev++; }
+    else if (!strcmp(key, "br_open")) { if (v >= 0.5) { d->browse = 1; d->edit = 0; d->rev++; } }
+    else if (!strcmp(key, "st_zoom")) { int z = (int)lround(v); if (z >= 0 && z < 3) { d->st_zoom = z; d->rev++; } }
+    else if (!strncmp(key, "st_", 3)) { if (v >= 0.5) start_key(d, key); }
+    else if (!strcmp(key, "br_sort")) br_set_sort(d, (int)(v + 0.5));
+    else if (!strcmp(key, "br_chill") || !strcmp(key, "br_hype")) { if (v >= 0.5) br_tag(d, key[3] == 'h' ? TAG_HYPE : TAG_CHILL); }
     else if (!strcmp(key, "br_close")) { if (v >= 0.5) { d->browse = 0; d->rev++; } }
     else if (!strcmp(key, "br_up")) { if (v >= 0.5) br_back(d); }
     else if (!strcmp(key, "br_pgup") || !strcmp(key, "br_pgdn")) { if (v >= 0.5) br_page(d, key[6] == 'd'); }
@@ -1301,7 +1901,7 @@ static void set_local(void *inst, const char *key, const char *val) {
     }
     else if (!strcmp(key, "play")) { if ((int)v != d->playing || d->previewing) play_toggle(d, (int)v); }
     else if (!strcmp(key, "cue")) { if (v >= 0.5) cue_press(d); }
-    else if (!strcmp(key, "pitch")) { if ((float)v != d->pitch) { d->pitch = (float)v; d->rev++; } }
+    else if (!strcmp(key, "pitch")) { if ((float)v != d->pitch) { d->pitch = (float)v; d->pf_picked = 0; d->rev++; } }
     else if (!strcmp(key, "range")) { d->range = (int)v < 0 ? 0 : (int)v > 2 ? 2 : (int)v; d->rev++; }
     else if (!strcmp(key, "sync")) { d->sync = (int)v; d->sync_trim = 0; d->rev++; }
     else if (!strcmp(key, "filter")) d->filt = (float)v;
@@ -1310,7 +1910,7 @@ static void set_local(void *inst, const char *key, const char *val) {
     else if (!strcmp(key, "eq_high")) d->eq[2] = (float)v;
     else if (!strcmp(key, "loop_len")) { d->loop_beats = (int)v < 0 ? 0 : (int)v > 7 ? 7 : (int)v; if (d->loop_on) loop_set(d, 1); }
     else if (!strcmp(key, "loop")) loop_set(d, (int)v);
-    else if (!strcmp(key, "bpm")) { if (v >= 40 && v <= 250) { d->bpm = v; d->rev++; } }
+    else if (!strcmp(key, "bpm")) { if (v >= 40 && v <= 250) { d->bpm = v; d->rev++; if (d->t) bpm_seen_add(d->t->path, v); } }
     else if (!strcmp(key, "pad_mode")) d->pad_mode = (int)v < 0 ? 0 : (int)v > 2 ? 2 : (int)v;
     else if (!strcmp(key, "pad_lights")) {
         int on = (int)v ? 1 : 0;
@@ -1366,7 +1966,10 @@ static void set_local(void *inst, const char *key, const char *val) {
         (void)ranges;
         if (v >= 0.5) tempo_step(d, key[6] == 'u' ? 0.1 : -0.1);
     }
-    else if (!strcmp(key, "pitch_reset")) { if (v >= 0.5) { d->pitch = 0; d->rev++; } }
+    else if (!strcmp(key, "pitch_reset")) { if (v >= 0.5) { d->pitch = 0; d->pf_picked = 0; d->rev++; } }
+    else if (!strcmp(key, "pitch_learn")) { if (v >= 0.5) { d->pf_learn = !d->pf_learn; d->rev++; } }
+    else if (!strcmp(key, "pf_dir")) { d->pf_dir = (int)lround(v) ? 1 : 0; d->pf_picked = 0; d->rev++; }
+    else if (!strcmp(key, "pf_cc")) { int c = (int)lround(v); d->pf_cc = c >= 0 && c < 16 * 128 ? c : -1; d->pf_picked = 0; }
     else if (!strcmp(key, "jog")) {
         /* a relative control: each wheel click, +/- press or Q-Link event moves it a little (see rel_delta) */
         double dv = rel_delta(&d->jog_last, v);
@@ -1398,12 +2001,47 @@ static int get_local(void *inst, const char *key, char *buf, int n) {
         pthread_mutex_unlock(&d->mu);
         return r;
     }
-    if (!strcmp(key, "browse")) return snprintf(buf, n, "%d", d->browse);
+    if (!strcmp(key, "browse")) return snprintf(buf, n, "%d", d->edit ? 2 : d->browse);
+    if (!strcmp(key, "st_zoom")) return snprintf(buf, n, "%d", d->st_zoom);
+    if (!strcmp(key, "pf_dir")) return snprintf(buf, n, "%d", d->pf_dir);
+    if (!strcmp(key, "pf_cc")) return snprintf(buf, n, "%d", d->pf_cc);
+    if (!strcmp(key, "pitch_learn")) return snprintf(buf, n, "0");
+    if (!strcmp(key, "pf_label")) {
+        if (d->pf_learn) return snprintf(buf, n, "MOVE THE FADER NOW");
+        if (d->pf_cc < 0) return snprintf(buf, n, "NO FADER YET");
+        return snprintf(buf, n, "CC %d  CH %d%s", d->pf_cc % 128, d->pf_cc / 128 + 1, d->pf_picked ? "" : "  (PICK UP)");
+    }
+    if (!strncmp(key, "zw_", 3)) {   /* the START page's waveform: before the start dimmed, the start a white line */
+        int c = atoi(key + 3) - 1;
+        if (c < 0 || c >= ZW_COLS) return 0;
+        int base = d->deck_id * 3 * WF_LEVELS;
+        if (!d->t) return snprintf(buf, n, "%d", base);
+        zw_update(d);
+        double span = ZOOM_S[d->st_zoom] * SR, a = d->zw_from + span * c / ZW_COLS, b = d->zw_from + span * (c + 1) / ZW_COLS;
+        int st = d->start >= a && d->start < b ? 2 : b <= d->start ? 1 : 0;
+        return snprintf(buf, n, "%d", base + st * WF_LEVELS + d->zw[c]);
+    }
+    if (!strcmp(key, "st_info") || !strcmp(key, "st_from") || !strcmp(key, "st_to") || !strcmp(key, "st_title") || !strcmp(key, "st_pos")) {
+        if (!d->t) return snprintf(buf, n, key[3] == 'i' ? "LOAD A TRACK FIRST" : " ");
+        char t1[24], t2[24];
+        if (!strcmp(key, "st_title")) return snprintf(buf, n, "%s", d->t->name);
+        if (!strcmp(key, "st_pos")) { fmt_frames(d->pos, t1, sizeof t1); return snprintf(buf, n, "PLAYHEAD %s", t1); }
+        zw_update(d);
+        if (!strcmp(key, "st_from")) { fmt_frames(d->zw_from, t1, sizeof t1); return snprintf(buf, n, "%s", t1); }
+        if (!strcmp(key, "st_to")) { fmt_frames(d->zw_from + ZOOM_S[d->st_zoom] * SR, t1, sizeof t1); return snprintf(buf, n, "%s", t1); }
+        fmt_frames(d->start, t1, sizeof t1); (void)t2;   /* (PARAM_TEXT_MAX: 48 characters) */
+        return snprintf(buf, n, "START %s   %s", t1,
+                        d->start_set ? "SET BY HAND" : d->t->sound > 0 ? "AUTO: SILENCE SKIPPED" : "AUTO: FIRST BEAT");
+    }
     if (!strcmp(key, "br_path")) {
         pthread_mutex_lock(&d->mu);
         int r;
         if (now_s() < d->warn_until) r = snprintf(buf, n, "%s", d->warn);
-        else if (!d->bl || !d->bl->dir[0]) r = snprintf(buf, n, "DRIVES   (%d)", d->bl ? d->bl->n : 0);
+        else if (!d->bl || !d->bl->dir[0]) r = snprintf(buf, n, "BROWSE");
+        else if (d->bl->title[0]) {   /* a rekordbox playlist: its own path line, the end of it when long */
+            size_t l = strlen(d->bl->title);
+            r = snprintf(buf, n, "%s%s   (%d)", l > 38 ? "..." : "", l > 38 ? d->bl->title + l - 38 : d->bl->title, d->bl->n);
+        }
         else {
             /* "USB DRIVE > House   (154)": the drive's name, not /media/..., and the last folders that fit */
             char p2[1100]; const char *dd = d->bl->dir;
@@ -1415,30 +2053,57 @@ static int get_local(void *inst, const char *key, char *buf, int n) {
             }
             out[o] = 0;
             size_t l = strlen(out);
-            r = snprintf(buf, n, "%s%s   (%d)", l > 52 ? "..." : "", l > 52 ? out + l - 52 : out, d->bl->n);
+            r = snprintf(buf, n, "%s%s   (%d)", l > 38 ? "..." : "", l > 38 ? out + l - 38 : out, d->bl->n);
         }
         pthread_mutex_unlock(&d->mu);
         return r;
     }
+    if (!strcmp(key, "br_sort")) return snprintf(buf, n, "%d", d->br_sort);
     if (!strncmp(key, "brs_", 4) || !strncmp(key, "brd_", 4)) {
-        /* brs_N: the row's background (0 normal, 1 selected, 2/3 on deck A/B, 4/5 the same selected, 6/7 folder, 8 empty);
-         * brd_N: 1 lays the grey veil over a played track */
+        /* brs_N: the row's picture (0 normal, 1 selected, 2/3 on deck A/B, 4/5 the same selected, 6/7 folder, 8 none:
+         * empty, or the browser closed); brd_N: which of the row's texts show (0 none, 1 white, 2 grey: played) */
         int i = atoi(key + 4) - 1, sel, on, played;
         if (i < 0 || i >= BR_ROWS) return 0;
-        int kind = br_row(d, i, &sel, &on, &played, NULL, 0);
-        if (key[2] == 'd') return snprintf(buf, n, "%d", kind == 2 && played && !on);
+        int kind = br_row(d, i, &sel, &on, &played, NULL, 0, NULL, 0, NULL);
+        if (!d->browse) kind = 0;
+        if (key[2] == 'd') return snprintf(buf, n, "%d", !kind ? 0 : kind == 2 && played && !on ? 2 : 1);
         int f = kind == 0 ? 8 : kind == 1 ? 6 + sel : on ? (on == 1 ? 2 : 3) + 2 * sel : sel;
         return snprintf(buf, n, "%d", f);
     }
+    if (!strncmp(key, "brg_", 4)) {   /* the row's CHILL / HYPE tag: 0 none, 1 CHILL, 2 HYPE */
+        int i = atoi(key + 4) - 1, r = 0;
+        if (i < 0 || i >= BR_ROWS) return 0;
+        pthread_mutex_lock(&d->mu);
+        int k = d->top + i;
+        if (d->browse && d->bl && k < d->bl->n && !d->bl->isdir[k]) r = d->bl->tag[k];
+        pthread_mutex_unlock(&d->mu);
+        return snprintf(buf, n, "%d", r);
+    }
+    if (!strcmp(key, "br_chill") || !strcmp(key, "br_hype")) return snprintf(buf, n, "0");
+    if (!strncmp(key, "brr_", 4)) {   /* the row's stars: 0 none shown, 1 + stars (0-5) for a track */
+        int i = atoi(key + 4) - 1, r = 0;
+        if (i < 0 || i >= BR_ROWS) return 0;
+        pthread_mutex_lock(&d->mu);
+        int k = d->top + i;
+        if (d->browse && d->bl && k < d->bl->n && !d->bl->isdir[k]) r = 1 + d->bl->stars[k];
+        pthread_mutex_unlock(&d->mu);
+        return snprintf(buf, n, "%d", r);
+    }
     if (!strncmp(key, "brt_", 4) || !strcmp(key, "br_eject")) return snprintf(buf, n, "0");
-    if (!strncmp(key, "br_", 3) && key[3] >= '1' && key[3] <= '0' + BR_ROWS && !key[4]) {   /* the row's text, with what it is */
+    if (!strncmp(key, "st_", 3)) return snprintf(buf, n, "0");   /* the START page's buttons */
+    if ((!strncmp(key, "bra_", 4) || !strncmp(key, "brb_", 4)) && key[4] >= '1' && key[4] <= '0' + BR_ROWS && !key[5]) {
+        /* the row's second line (a track's artist; what a folder is) and its tempo */
+        char name[256], artist[256]; int sel, on, played; float bpm;
+        int kind = br_row(d, key[4] - '1', &sel, &on, &played, name, sizeof name, artist, sizeof artist, &bpm);
+        if (key[2] == 'b') return kind == 2 && bpm > 0 ? snprintf(buf, n, "%.1f", bpm) : snprintf(buf, n, kind == 2 ? "--" : " ");
+        return snprintf(buf, n, "%s", kind && artist[0] ? artist : " ");
+    }
+    if (!strncmp(key, "br_", 3) && key[3] >= '1' && key[3] <= '0' + BR_ROWS && !key[4]) {   /* the row's title */
         char name[256]; int sel, on, played;
-        int kind = br_row(d, atoi(key + 3) - 1, &sel, &on, &played, name, sizeof name);
+        int kind = br_row(d, atoi(key + 3) - 1, &sel, &on, &played, name, sizeof name, NULL, 0, NULL);
         if (!kind) return snprintf(buf, n, " ");
         if (kind == 1) return snprintf(buf, n, "%s  >", name);   /* a folder: tap twice (or OPEN) to go in */
-        char *dot = strrchr(name, '.');
-        if (dot && dot != name && (!strcasecmp(dot, ".mp3") || !strcasecmp(dot, ".wav"))) *dot = 0;   /* no extension */
-        return snprintf(buf, n, "%s", name);   /* the name alone: the row's colour says on a deck / played */
+        return snprintf(buf, n, "%s", name);   /* the title alone: the row's colour says on a deck / played */
     }
     if (!strncmp(key, "br_", 3) && key[3] >= '1' && key[3] <= '9') {   /* row text, and "<row>_on" when it is the selection */
         char *us = strchr(key + 3, '_');
@@ -1486,6 +2151,17 @@ static int get_local(void *inst, const char *key, char *buf, int n) {
         pthread_mutex_lock(&d->mu); r = snprintf(buf, n, "%s", d->status); pthread_mutex_unlock(&d->mu);
         return r;
     }
+    if (!strcmp(key, "tm_el") || !strcmp(key, "tm_rem") || !strcmp(key, "tm_len")) {
+        /* the header's clock: time played, time left at the current tempo (what a DJ mixes by), and the length */
+        if (!d->t) return snprintf(buf, n, key[3] == 'r' ? "-:--.-" : key[3] == 'e' ? "0:00.0" : " ");
+        double rate = steady_rate(d);
+        if (!(rate > 0.05)) rate = 1;
+        double sec = key[3] == 'e' ? d->pos / SR : key[3] == 'r' ? ((double)d->t->frames - d->pos) / SR / rate : (double)d->t->frames / SR;
+        if (sec < 0) sec = 0;
+        int ds = (int)(sec * 10);   /* tenths, rounded down: the last tenth shows 0:00.0 */
+        if (key[3] == 'l') return snprintf(buf, n, "OF %d:%02d", ds / 600, ds / 10 % 60);
+        return snprintf(buf, n, "%s%d:%02d.%d", key[3] == 'r' ? "-" : "", ds / 600, ds / 10 % 60, ds % 10);
+    }
     if (!strcmp(key, "time")) {
         if (!d->t) return snprintf(buf, n, "--:-- / --:--");
         char a[16], b[16]; fmt_time(a, sizeof a, d->pos); fmt_time(b, sizeof b, (double)d->t->frames - d->pos);
@@ -1505,7 +2181,7 @@ static int get_local(void *inst, const char *key, char *buf, int n) {
     }
     if (!strncmp(key, "pad_", 4) && key[4] >= '1' && key[4] <= '9') {   /* the big tiles on PLAY: empty in the browser */
         int k = atoi(key + 4) - 1;
-        return k >= 0 && k < 16 ? snprintf(buf, n, "%d", d->browse ? PAD_BLANK : pad_value(d, k)) : 0;
+        return k >= 0 && k < 16 ? snprintf(buf, n, "%d", d->browse || d->edit ? PAD_BLANK : pad_value(d, k)) : 0;
     }
     if (!strncmp(key, "bpad_", 5)) {   /* the small pad map beside the browser */
         int k = atoi(key + 5) - 1;
@@ -1643,6 +2319,14 @@ static void take_ready(deck_t *d) {
         for (int i = 0; i < NCUES; i++) d->cues[i] = -1;
         d->play_frames = 0; d->played_marked = 0;
         if (d->bpm > 0) d->cue = d->pos = d->anchor;   /* start on the first beat */
+        if (d->t->sound > 0) {   /* a silent intro: start at the music, on the beat at or just before it */
+            double s = d->t->sound - 0.01 * SR;
+            if (d->bpm > 0) { double bl = 60.0 * SR / d->bpm; s = d->anchor + floor((d->t->sound - d->anchor + 0.03 * SR) / bl) * bl; }
+            d->cue = d->pos = s > 0 ? s : 0;
+        }
+        d->start = d->start_auto = d->cue; d->start_set = 0;
+        double mine = d->t->mine;   /* set by hand on the START page before (read by the worker) */
+        if (mine >= 0 && mine < d->t->frames) { d->start = d->cue = d->pos = mine; d->start_set = 1; }
         d->rev++;
         apply_restore(d);
     }
@@ -1845,9 +2529,10 @@ static int is_local_key(const char *k) {   /* this deck's own identity and plumb
 static int is_trigger_key(const char *k) {   /* reads back 0 whatever was sent */
     static const char *T[] = {"load", "cue", "rescan", "jump_back", "jump_fwd", "br_open", "br_close", "br_up", "br_pgup",
                               "br_pgdn", "nudge_dn", "nudge_up", "pitch_reset", "jog", "br_scroll", "load_a", "load_b",
-                              "tempo_up", "tempo_dn", NULL};
+                              "tempo_up", "tempo_dn", "pitch_learn", "pl_a", "pl_b", "br_chill", "br_hype", NULL};
     for (int i = 0; T[i]; i++) if (!strcmp(k, T[i])) return 1;
     if (!strncmp(k, "tp_", 3) || !strncmp(k, "brt_", 4) || !strcmp(k, "br_eject")) return 1;
+    if (!strncmp(k, "st_", 3) && strcmp(k, "st_zoom") && strcmp(k, "st_info") && strcmp(k, "st_from") && strcmp(k, "st_to") && strcmp(k, "st_title") && strcmp(k, "st_pos")) return 1;
     return !strncmp(k, "br_", 3) && k[3] >= '1' && k[3] <= '9';
 }
 
@@ -2000,7 +2685,9 @@ static const uint8_t PAD_RGB[PF_N][3] = {   /* the tile colours (art/make_pads.p
     {47, 155, 255}, {255, 77, 106}, {232, 237, 242}, {232, 237, 242}, {255, 176, 77}, {255, 107, 213}, {255, 107, 213},
     {255, 107, 213}, {255, 210, 63}, {255, 210, 63}, {255, 176, 77}, {232, 237, 242}, {232, 237, 242},
     /* LOOP 1, 2, 4, 8 */
-    {255, 107, 213}, {255, 107, 213}, {255, 107, 213}, {255, 107, 213}};
+    {255, 107, 213}, {255, 107, 213}, {255, 107, 213}, {255, 107, 213},
+    /* SORT, STARS -, STARS +, CHILL, HYPE */
+    {255, 193, 77}, {255, 193, 77}, {255, 193, 77}, {90, 200, 250}, {255, 90, 60}};
 _Static_assert(sizeof PAD_RGB / sizeof PAD_RGB[0] == PF_N, "a colour for every pad function");
 static uint8_t g_light_sent[16][3];
 static double g_light_full, g_light_touch;
@@ -2101,6 +2788,23 @@ static void set_param(void *inst, const char *key, const char *val) {
         return;
     }
     if (!strncmp(key, "tp_", 3) && atof(val) >= 0.5 && deck_pad(d, atoi(key + 3) - 1, 1)) return;   /* DECK A / B tiles */
+    if (!strcmp(key, "pl_a") || !strcmp(key, "pl_b") || !strcmp(key, "pf_dir")) {
+        /* SETUP: learn deck A's or B's pitch fader (either screen), and one direction for both */
+        double v = atof(val);
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < MAX_DECKS; i++) {
+            deck_t *o = g_decks[i];
+            if (!o) continue;
+            if (key[1] == 'f') { o->pf_dir = (int)lround(v) ? 1 : 0; o->pf_picked = 0; o->rev++; }
+            else if (v >= 0.5) {
+                if (o->deck_id == key[3] - 'a') o->pf_learn = !o->pf_learn; else o->pf_learn = 0;   /* one at a time */
+                o->rev++;
+            }
+        }
+        pthread_mutex_unlock(&g_mu);
+        d->rev++;
+        return;
+    }
     if (!strcmp(key, "show_a") || !strcmp(key, "show_b")) {   /* the big A / B switch at the top of PLAY */
         if (atof(val) >= 0.5) { d->target = key[5] - 'a'; d->rev++; }
         return;
@@ -2159,6 +2863,16 @@ static int get_param(void *inst, const char *key, char *buf, int n) {
         return snprintf(buf, n, "%u", r);
     }
     if (!strcmp(key, "pad_learn") || !strcmp(key, "show_a") || !strcmp(key, "show_b")) return snprintf(buf, n, "0");
+    if (!strcmp(key, "pl_a") || !strcmp(key, "pl_b")) return snprintf(buf, n, "0");
+    if (!strcmp(key, "pfl_a") || !strcmp(key, "pfl_b")) {   /* each deck's pitch fader, on either screen */
+        int letter = key[4] - 'a', r;
+        pthread_mutex_lock(&g_mu);
+        deck_t *o = d->deck_id == letter ? d : NULL;
+        if (!o) for (int i = 0; i < MAX_DECKS; i++) if (g_decks[i] && g_decks[i]->deck_id == letter) o = g_decks[i];
+        r = o ? get_local(o, "pf_label", buf, n) : snprintf(buf, n, "NO DECK %c", 'A' + letter);
+        pthread_mutex_unlock(&g_mu);
+        return r;
+    }
     if ((!strncmp(key, "wf_", 3) && key[3] >= '1' && key[3] <= '9') || !strncmp(key, "wfb_", 4)) {
         /* two waveform rows on every screen: wf_N is deck A's, wfb_N deck B's, whichever deck the screen is on */
         int letter = key[2] == 'b', r;
@@ -2167,6 +2881,15 @@ static int get_param(void *inst, const char *key, char *buf, int n) {
         deck_t *o = d->deck_id == letter ? d : NULL;
         if (!o) for (int i = 0; i < MAX_DECKS; i++) if (g_decks[i] && g_decks[i]->deck_id == letter) o = g_decks[i];
         r = o ? get_local(o, k2, buf, n) : snprintf(buf, n, "%d", letter * 3 * WF_LEVELS);   /* no such deck: a flat line */
+        pthread_mutex_unlock(&g_mu);
+        return r;
+    }
+    if (!strcmp(key, "rem_a") || !strcmp(key, "rem_b")) {   /* each deck's time left, beside its tempo */
+        int letter = key[4] - 'a', r;
+        pthread_mutex_lock(&g_mu);
+        deck_t *o = d->deck_id == letter ? d : NULL;
+        if (!o) for (int i = 0; i < MAX_DECKS; i++) if (g_decks[i] && g_decks[i]->deck_id == letter) o = g_decks[i];
+        r = o ? get_local(o, "tm_rem", buf, n) : snprintf(buf, n, " ");
         pthread_mutex_unlock(&g_mu);
         return r;
     }
@@ -2211,8 +2934,41 @@ static int get_param(void *inst, const char *key, char *buf, int n) {
     return r;
 }
 
+/* A CC on this deck's own MIDI input: its learned pitch fader (this deck, whatever the screen shows). The fader takes
+ * over only once it reaches the pitch it is at (soft takeover), so the tempo never jumps when it is first touched. */
+static void pitch_fader_to(deck_t *d, float f) {
+    if (d->pf_dir) f = -f;
+    if (!d->pf_picked) {
+        float a = d->pf_prev - d->pitch, b = f - d->pitch;
+        if (fabsf(b) < 0.04f || (d->pf_prev > -2 && (a < 0) != (b < 0))) d->pf_picked = 1;
+        d->pf_prev = f;
+        if (!d->pf_picked) { d->rev++; return; }
+    }
+    d->pf_prev = f;
+    if (f != d->pitch) { d->pitch = f; d->rev++; }
+}
+
+/* A CC from the controller: a deck learning its pitch fader takes it; a deck whose fader it is follows it. Either deck's
+ * track may receive it (MPC sends a controller to the selected track), so it goes to the deck that owns it. */
+static void pitch_fader(const uint8_t *msg) {
+    int id = (msg[0] & 15) * 128 + (msg[1] & 127);
+    float f = (msg[2] & 127) / 127.0f * 2 - 1;
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < MAX_DECKS; i++) {
+        deck_t *o = g_decks[i];
+        if (!o) continue;
+        if (o->pf_learn) {
+            for (int j = 0; j < MAX_DECKS; j++) if (g_decks[j] && g_decks[j] != o && g_decks[j]->pf_cc == id) g_decks[j]->pf_cc = -1;   /* one fader, one deck */
+            o->pf_cc = id; o->pf_learn = 0; o->pf_picked = 0; o->pf_prev = -9; o->rev++;
+        }
+        else if (o->pf_cc == id) pitch_fader_to(o, f);
+    }
+    pthread_mutex_unlock(&g_mu);
+}
+
 static void midi(void *inst, const uint8_t *msg, int len) {   /* the pads follow CONTROL too */
     deck_t *d = inst;
+    if (len >= 3 && (msg[0] & 0xf0) == 0xB0) { pitch_fader(msg); return; }
     /* Pads only: notes on and off. Everything else goes, above all pad pressure (dozens of messages a hit), which used to
      * take the deck lock on the audio thread and could fill the other deck's 64-slot queue, so a note-off was lost and a
      * held pad (nudge, CUE preview, roll) stayed held. */

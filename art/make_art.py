@@ -15,5 +15,6 @@ def svg(name, w, h, body):
 for i, c in enumerate(DECK):
     svg("rule_%s.svg" % "ab"[i], 1252, 4, '<rect width="1252" height="4" rx="2" fill="#%s"/>' % c)
 svg("clear_row.svg", 920, 64, '<rect width="920" height="64" fill="#000" fill-opacity="0.001"/>')
+svg("clear_wave.svg", 1252, 98, '<rect width="1252" height="98" fill="#000" fill-opacity="0.001"/>')   # tap the waveform: START page
 svg("clear.svg", 138, 88, '<rect width="138" height="88" fill="#000" fill-opacity="0.001"/>')
 print("wrote the SVG artwork")

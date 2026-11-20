@@ -19,11 +19,31 @@ Built with the [Open MPC](https://open-mpc.github.io/) toolchain. Tested on an M
   act on, so you always know which deck you're about to hit.
 - **Cue and loops:** CDJ-style CUE (hold to preview), 8 hot cues, loops of 2, 4 and 8 bars, auto loops of 1 to 8
   beats, loop rolls, beat jumps.
-- **Track browser** over every drive: big rows readable in a dark room, tracks on a deck shaded in its colour, tracks
-  you've played greyed out. Load onto either deck from either screen. A deck that's playing needs LOAD pressed twice,
+- **Track browser** over every drive: big rows readable in a dark room, each with the title, the artist and the
+  tempo, sortable by ORDER, ARTIST, TITLE or BPM. Tracks on a deck are shaded in its colour, tracks you've played greyed
+  out. Artist, title and tempo come from rekordbox, an MP3's tags or an "Artist - Title" file name, and a deck's own
+  tempo once it has loaded the track. Load onto either deck from either screen. The browser stays open after a load, ready for the next track. A deck that's playing needs LOAD pressed twice,
   so a slip can't cut it off.
+- **Two sections:** the browser opens on FOLDERS (every drive and its folders) and REKORDBOX.
+- **Rekordbox playlists:** a stick exported from rekordbox (Export mode, for CDJs) gets a REKORDBOX entry at the top of
+  the browser, with your playlist folders and playlists in rekordbox's order, with
+  rekordbox's titles, artists and tempos. Read-only: mpSEEJAY never writes to the stick. WAV and MP3 tracks only (others are left out).
 - **Safety for live use:** tracks load into memory, so the drive they came from can come out; the jog ring flashes in
   the last 30 seconds of a track; EJECT in the browser says when a drive is safe to pull.
+- **Silent intros skipped:** a track that starts with silence (or hiss) loads with its cue on the first beat of the
+  music.
+- **Stars:** pads 3 and 4 in the browser (STARS - / +) rate the selected track 0 to 5 stars, shown on its row and
+  remembered for the file; rekordbox's own ratings show too. SORT has STARS 5-1 and STARS 1-5.
+- **CHILL / HYPE:** a switch per track (both off until you pick one): pads 7 and 8 in the browser, or the CHILL and
+  HYPE buttons under the pad map. The row shows the tag, and the browser's top has CHILL and HYPE sections listing every
+  tagged track, from any drive or playlist.
+- **Clock:** time played, time left at the current tempo (big) and the length on every page, and each deck's time left
+  under its tempo.
+- **Pitch faders:** SETUP learns a MIDI fader for each deck's pitch (LEARN DECK A / B FADER, then move it), with soft
+  takeover so the tempo never jumps, and UP+ / UP- for which way is faster. CC 22 also moves the pitch.
+- **START page:** tap the waveform to see the start of the track up close and move where it starts (by a bar, a beat or
+  10 ms, to the playhead, the top, or back to AUTO), and play from there. A start set by hand is remembered for that
+  file, in a hidden file in mpSEEJAY's Tracks folder.
 - WAV and MP3, up to 15 minutes a track. Saves each deck's track, cues, tempo and settings with the project.
 
 ## Install
@@ -59,7 +79,7 @@ Pad 1 is bottom left. The screen and the pad lights follow the bank you last pla
 | 2 | loop rolls of 1/8, 1/4, 1/2, 1 beat (while held) |
 | Bottom | loops of 1, 2, 4, 8 beats |
 
-**In the browser:** 14 UP, 10 DOWN (both repeat while held), 13 PAGE UP, 5 PAGE DOWN, 9 BACK, 11 OPEN, 1 LOAD A,
+**In the browser:** 14 UP, 10 DOWN (both repeat while held), 13 PAGE UP, 5 PAGE DOWN, 9 BACK, 11 OPEN, 15 SORT, 3 STARS -, 4 STARS +, 7 CHILL, 8 HYPE, 1 LOAD A,
 2 LOAD B, 16 CLOSE.
 
 ## Pages

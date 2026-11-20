@@ -225,7 +225,8 @@
       "name": "Browser",
       "options": [
         "Off",
-        "On"
+        "On",
+        "Edit"
       ],
       "automatable": false
     },
@@ -1315,7 +1316,7 @@
       "key": "pad_1",
       "name": "Pad 1 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1325,7 +1326,7 @@
       "key": "pad_2",
       "name": "Pad 2 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1335,7 +1336,7 @@
       "key": "pad_3",
       "name": "Pad 3 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1345,7 +1346,7 @@
       "key": "pad_4",
       "name": "Pad 4 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1355,7 +1356,7 @@
       "key": "pad_5",
       "name": "Pad 5 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1365,7 +1366,7 @@
       "key": "pad_6",
       "name": "Pad 6 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1375,7 +1376,7 @@
       "key": "pad_7",
       "name": "Pad 7 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1385,7 +1386,7 @@
       "key": "pad_8",
       "name": "Pad 8 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1395,7 +1396,7 @@
       "key": "pad_9",
       "name": "Pad 9 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1405,7 +1406,7 @@
       "key": "pad_10",
       "name": "Pad 10 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1415,7 +1416,7 @@
       "key": "pad_11",
       "name": "Pad 11 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1425,7 +1426,7 @@
       "key": "pad_12",
       "name": "Pad 12 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1435,7 +1436,7 @@
       "key": "pad_13",
       "name": "Pad 13 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1445,7 +1446,7 @@
       "key": "pad_14",
       "name": "Pad 14 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1455,7 +1456,7 @@
       "key": "pad_15",
       "name": "Pad 15 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1465,7 +1466,7 @@
       "key": "pad_16",
       "name": "Pad 16 Light",
       "min": 0,
-      "max": 141,
+      "max": 156,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1785,7 +1786,7 @@
       "key": "bpad_1",
       "name": "Browser Pad 1",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1795,7 +1796,7 @@
       "key": "bpad_2",
       "name": "Browser Pad 2",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1805,7 +1806,7 @@
       "key": "bpad_3",
       "name": "Browser Pad 3",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1815,7 +1816,7 @@
       "key": "bpad_4",
       "name": "Browser Pad 4",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1825,7 +1826,7 @@
       "key": "bpad_5",
       "name": "Browser Pad 5",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1835,7 +1836,7 @@
       "key": "bpad_6",
       "name": "Browser Pad 6",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1845,7 +1846,7 @@
       "key": "bpad_7",
       "name": "Browser Pad 7",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1855,7 +1856,7 @@
       "key": "bpad_8",
       "name": "Browser Pad 8",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1865,7 +1866,7 @@
       "key": "bpad_9",
       "name": "Browser Pad 9",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1875,7 +1876,7 @@
       "key": "bpad_10",
       "name": "Browser Pad 10",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1885,7 +1886,7 @@
       "key": "bpad_11",
       "name": "Browser Pad 11",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1895,7 +1896,7 @@
       "key": "bpad_12",
       "name": "Browser Pad 12",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1905,7 +1906,7 @@
       "key": "bpad_13",
       "name": "Browser Pad 13",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1915,7 +1916,7 @@
       "key": "bpad_14",
       "name": "Browser Pad 14",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1925,7 +1926,7 @@
       "key": "bpad_15",
       "name": "Browser Pad 15",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -1935,7 +1936,7 @@
       "key": "bpad_16",
       "name": "Browser Pad 16",
       "min": 0,
-      "max": 140,
+      "max": 155,
       "display": "int",
       "live": true,
       "automatable": false,
@@ -2744,122 +2745,182 @@
     {
       "key": "brs_1",
       "name": "Row 1 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brs_2",
       "name": "Row 2 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brs_3",
       "name": "Row 3 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brs_4",
       "name": "Row 4 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brs_5",
       "name": "Row 5 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brs_6",
       "name": "Row 6 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brd_1",
-      "name": "Row 1 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 1 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brd_2",
-      "name": "Row 2 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 2 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brd_3",
-      "name": "Row 3 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 3 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brd_4",
-      "name": "Row 4 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 4 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brd_5",
-      "name": "Row 5 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 5 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brd_6",
-      "name": "Row 6 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 6 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brt_1",
@@ -2941,22 +3002,32 @@
     {
       "key": "brs_7",
       "name": "Row 7 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brd_7",
-      "name": "Row 7 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 7 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brt_7",
@@ -2972,22 +3043,32 @@
     {
       "key": "brs_8",
       "name": "Row 8 Look",
-      "min": 0,
-      "max": 8,
-      "display": "int",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Normal",
+        "Selected",
+        "Deck A",
+        "Deck B",
+        "Deck A Selected",
+        "Deck B Selected",
+        "Folder",
+        "Folder Selected",
+        "None"
+      ]
     },
     {
       "key": "brd_8",
-      "name": "Row 8 Played",
-      "min": 0,
-      "max": 1,
-      "display": "int",
+      "name": "Row 8 Text",
       "live": true,
       "automatable": false,
-      "legacy": true
+      "legacy": true,
+      "options": [
+        "Hidden",
+        "Shown",
+        "Played"
+      ]
     },
     {
       "key": "brt_8",
@@ -2999,6 +3080,1328 @@
       "momentary": true,
       "debounce_ms": 100,
       "automatable": false
+    },
+    {
+      "key": "br_sort",
+      "name": "Sort",
+      "options": [
+        "Order",
+        "Artist",
+        "Title",
+        "BPM",
+        "Stars 5-1",
+        "Stars 1-5"
+      ],
+      "automatable": false
+    },
+    {
+      "key": "bra_1",
+      "name": "Row 1 Artist",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "bra_2",
+      "name": "Row 2 Artist",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "bra_3",
+      "name": "Row 3 Artist",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "bra_4",
+      "name": "Row 4 Artist",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "bra_5",
+      "name": "Row 5 Artist",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "bra_6",
+      "name": "Row 6 Artist",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brb_1",
+      "name": "Row 1 BPM",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brb_2",
+      "name": "Row 2 BPM",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brb_3",
+      "name": "Row 3 BPM",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brb_4",
+      "name": "Row 4 BPM",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brb_5",
+      "name": "Row 5 BPM",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brb_6",
+      "name": "Row 6 BPM",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "st_open",
+      "name": "Edit Start",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_done",
+      "name": "Start Done",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_bar_dn",
+      "name": "Start Bar -",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_bar_up",
+      "name": "Start Bar +",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_beat_dn",
+      "name": "Start Beat -",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_beat_up",
+      "name": "Start Beat +",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_fine_dn",
+      "name": "Start Fine -",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_fine_up",
+      "name": "Start Fine +",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_set",
+      "name": "Start Here",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_auto",
+      "name": "Start Auto",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_top",
+      "name": "Start Top",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_play",
+      "name": "Play From Start",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "st_zoom",
+      "name": "Start View",
+      "options": [
+        "4 S",
+        "16 S",
+        "64 S"
+      ],
+      "automatable": false
+    },
+    {
+      "key": "st_info",
+      "name": "Start",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "st_from",
+      "name": "Start View From",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "st_to",
+      "name": "Start View To",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "st_title",
+      "name": "Start Track",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_1",
+      "name": "Start Wave 1",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_2",
+      "name": "Start Wave 2",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_3",
+      "name": "Start Wave 3",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_4",
+      "name": "Start Wave 4",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_5",
+      "name": "Start Wave 5",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_6",
+      "name": "Start Wave 6",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_7",
+      "name": "Start Wave 7",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_8",
+      "name": "Start Wave 8",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_9",
+      "name": "Start Wave 9",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_10",
+      "name": "Start Wave 10",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_11",
+      "name": "Start Wave 11",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_12",
+      "name": "Start Wave 12",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_13",
+      "name": "Start Wave 13",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_14",
+      "name": "Start Wave 14",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_15",
+      "name": "Start Wave 15",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_16",
+      "name": "Start Wave 16",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_17",
+      "name": "Start Wave 17",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_18",
+      "name": "Start Wave 18",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_19",
+      "name": "Start Wave 19",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_20",
+      "name": "Start Wave 20",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_21",
+      "name": "Start Wave 21",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_22",
+      "name": "Start Wave 22",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_23",
+      "name": "Start Wave 23",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_24",
+      "name": "Start Wave 24",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_25",
+      "name": "Start Wave 25",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_26",
+      "name": "Start Wave 26",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_27",
+      "name": "Start Wave 27",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_28",
+      "name": "Start Wave 28",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_29",
+      "name": "Start Wave 29",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_30",
+      "name": "Start Wave 30",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_31",
+      "name": "Start Wave 31",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_32",
+      "name": "Start Wave 32",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_33",
+      "name": "Start Wave 33",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_34",
+      "name": "Start Wave 34",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_35",
+      "name": "Start Wave 35",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_36",
+      "name": "Start Wave 36",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_37",
+      "name": "Start Wave 37",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_38",
+      "name": "Start Wave 38",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_39",
+      "name": "Start Wave 39",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_40",
+      "name": "Start Wave 40",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_41",
+      "name": "Start Wave 41",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_42",
+      "name": "Start Wave 42",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_43",
+      "name": "Start Wave 43",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_44",
+      "name": "Start Wave 44",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_45",
+      "name": "Start Wave 45",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_46",
+      "name": "Start Wave 46",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_47",
+      "name": "Start Wave 47",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_48",
+      "name": "Start Wave 48",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_49",
+      "name": "Start Wave 49",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_50",
+      "name": "Start Wave 50",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_51",
+      "name": "Start Wave 51",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_52",
+      "name": "Start Wave 52",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_53",
+      "name": "Start Wave 53",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_54",
+      "name": "Start Wave 54",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_55",
+      "name": "Start Wave 55",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_56",
+      "name": "Start Wave 56",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_57",
+      "name": "Start Wave 57",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_58",
+      "name": "Start Wave 58",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_59",
+      "name": "Start Wave 59",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_60",
+      "name": "Start Wave 60",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_61",
+      "name": "Start Wave 61",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_62",
+      "name": "Start Wave 62",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_63",
+      "name": "Start Wave 63",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_64",
+      "name": "Start Wave 64",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_65",
+      "name": "Start Wave 65",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_66",
+      "name": "Start Wave 66",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_67",
+      "name": "Start Wave 67",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_68",
+      "name": "Start Wave 68",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_69",
+      "name": "Start Wave 69",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_70",
+      "name": "Start Wave 70",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_71",
+      "name": "Start Wave 71",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_72",
+      "name": "Start Wave 72",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_73",
+      "name": "Start Wave 73",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_74",
+      "name": "Start Wave 74",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_75",
+      "name": "Start Wave 75",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_76",
+      "name": "Start Wave 76",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_77",
+      "name": "Start Wave 77",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_78",
+      "name": "Start Wave 78",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_79",
+      "name": "Start Wave 79",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "zw_80",
+      "name": "Start Wave 80",
+      "min": 0,
+      "max": 143,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "st_pos",
+      "name": "Start Playhead",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brr_1",
+      "name": "Row 1 Stars",
+      "min": 0,
+      "max": 6,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brr_2",
+      "name": "Row 2 Stars",
+      "min": 0,
+      "max": 6,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brr_3",
+      "name": "Row 3 Stars",
+      "min": 0,
+      "max": 6,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brr_4",
+      "name": "Row 4 Stars",
+      "min": 0,
+      "max": 6,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brr_5",
+      "name": "Row 5 Stars",
+      "min": 0,
+      "max": 6,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brr_6",
+      "name": "Row 6 Stars",
+      "min": 0,
+      "max": 6,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "tm_el",
+      "name": "Time Played",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "tm_rem",
+      "name": "Time Left",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "tm_len",
+      "name": "Track Length",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "rem_a",
+      "name": "Time Left A",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "rem_b",
+      "name": "Time Left B",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "pitch_learn",
+      "name": "Learn Pitch Fader",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "pf_dir",
+      "name": "Pitch Fader Direction",
+      "options": [
+        "Up = +",
+        "Up = -"
+      ],
+      "automatable": false
+    },
+    {
+      "key": "pf_label",
+      "name": "Pitch Fader",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "pl_a",
+      "name": "Learn Fader A",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "pl_b",
+      "name": "Learn Fader B",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "pfl_a",
+      "name": "Fader A",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "pfl_b",
+      "name": "Fader B",
+      "display": "string",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "br_chill",
+      "name": "Chill",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "br_hype",
+      "name": "Hype",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true,
+      "automatable": false
+    },
+    {
+      "key": "brg_1",
+      "name": "Row 1 Tag",
+      "min": 0,
+      "max": 2,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brg_2",
+      "name": "Row 2 Tag",
+      "min": 0,
+      "max": 2,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brg_3",
+      "name": "Row 3 Tag",
+      "min": 0,
+      "max": 2,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brg_4",
+      "name": "Row 4 Tag",
+      "min": 0,
+      "max": 2,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brg_5",
+      "name": "Row 5 Tag",
+      "min": 0,
+      "max": 2,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
+    },
+    {
+      "key": "brg_6",
+      "name": "Row 6 Tag",
+      "min": 0,
+      "max": 2,
+      "display": "int",
+      "live": true,
+      "automatable": false,
+      "legacy": true
     }
   ],
   "sections": [
@@ -3278,6 +4681,168 @@
         "brs_8",
         "brd_8",
         "brt_8"
+      ]
+    },
+    {
+      "label": "Browser columns",
+      "keys": [
+        "br_sort",
+        "bra_1",
+        "bra_2",
+        "bra_3",
+        "bra_4",
+        "bra_5",
+        "bra_6",
+        "brb_1",
+        "brb_2",
+        "brb_3",
+        "brb_4",
+        "brb_5",
+        "brb_6"
+      ]
+    },
+    {
+      "label": "Start page",
+      "keys": [
+        "st_open",
+        "st_done",
+        "st_bar_dn",
+        "st_bar_up",
+        "st_beat_dn",
+        "st_beat_up",
+        "st_fine_dn",
+        "st_fine_up",
+        "st_set",
+        "st_auto",
+        "st_top",
+        "st_play",
+        "st_zoom",
+        "st_info",
+        "st_from",
+        "st_to",
+        "st_title",
+        "zw_1",
+        "zw_2",
+        "zw_3",
+        "zw_4",
+        "zw_5",
+        "zw_6",
+        "zw_7",
+        "zw_8",
+        "zw_9",
+        "zw_10",
+        "zw_11",
+        "zw_12",
+        "zw_13",
+        "zw_14",
+        "zw_15",
+        "zw_16",
+        "zw_17",
+        "zw_18",
+        "zw_19",
+        "zw_20",
+        "zw_21",
+        "zw_22",
+        "zw_23",
+        "zw_24",
+        "zw_25",
+        "zw_26",
+        "zw_27",
+        "zw_28",
+        "zw_29",
+        "zw_30",
+        "zw_31",
+        "zw_32",
+        "zw_33",
+        "zw_34",
+        "zw_35",
+        "zw_36",
+        "zw_37",
+        "zw_38",
+        "zw_39",
+        "zw_40",
+        "zw_41",
+        "zw_42",
+        "zw_43",
+        "zw_44",
+        "zw_45",
+        "zw_46",
+        "zw_47",
+        "zw_48",
+        "zw_49",
+        "zw_50",
+        "zw_51",
+        "zw_52",
+        "zw_53",
+        "zw_54",
+        "zw_55",
+        "zw_56",
+        "zw_57",
+        "zw_58",
+        "zw_59",
+        "zw_60",
+        "zw_61",
+        "zw_62",
+        "zw_63",
+        "zw_64",
+        "zw_65",
+        "zw_66",
+        "zw_67",
+        "zw_68",
+        "zw_69",
+        "zw_70",
+        "zw_71",
+        "zw_72",
+        "zw_73",
+        "zw_74",
+        "zw_75",
+        "zw_76",
+        "zw_77",
+        "zw_78",
+        "zw_79",
+        "zw_80",
+        "st_pos"
+      ]
+    },
+    {
+      "label": "Stars and clock",
+      "keys": [
+        "brr_1",
+        "brr_2",
+        "brr_3",
+        "brr_4",
+        "brr_5",
+        "brr_6",
+        "tm_el",
+        "tm_rem",
+        "tm_len",
+        "rem_a",
+        "rem_b"
+      ]
+    },
+    {
+      "label": "Pitch fader",
+      "keys": [
+        "pitch_learn",
+        "pf_dir",
+        "pf_label",
+        "pl_a",
+        "pl_b",
+        "pfl_a",
+        "pfl_b"
+      ]
+    },
+    {
+      "label": "Chill and hype",
+      "keys": [
+        "br_chill",
+        "br_hype",
+        "brg_1",
+        "brg_2",
+        "brg_3",
+        "brg_4",
+        "brg_5",
+        "brg_6"
       ]
     }
   ]
